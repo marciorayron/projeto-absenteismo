@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Log de Auditoria{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-journal-text"></i> Logs de Auditoria</h5>
+        <span class="text-muted">Últimos 100 registros</span>
+    </div>
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">ID</th>
+                    <th style="width: 140px;">Data/Hora</th>
+                    <th>Usuário</th>
+                    <th style="width: 160px;">Ação</th>
+                    <th style="width: 230px;">Resumo</th>
+                    <th style="width: 80px;">Detalhes</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td><small class="text-muted">#{{ log.id }}</small></td>
+                    <td><small>{{ log.created_at.strftime('%d/%m/%Y %H:%M') if log.created_at else '—' }}</small></td>
+                    <td>{{ log.username }}</td>
+                    <td>
+                        <span class="badge bg-{{ log.action_badge }}">
+                            {{ log.action_label }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if log.has_changes %}
+                        <small class="text-muted">{{ log.summary }}</small>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.has_changes %}
+                        <button class="btn btn-outline-primary btn-sm" type="button"
+                                data-bs-toggle="modal" data-bs-target="#detailModal{{ log.id }}">
+                            <i class="bi bi-eye"></i> Ver
+                        </button>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">
+                        <i class="bi bi-journal-x display-6 d-block mb-2"></i>
+                        Nenhum log de auditoria encontrado.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ─── Detail Modals ─── -->
+{% for log in logs %}
+{% if log.has_changes %}
+<div class="modal fade" id="detailModal{{ log.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h6 class="modal-title">
+                    <i class="bi bi-journal-text"></i>
+                    Detalhes da Alteração #{{ log.id }}
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Metadata -->
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <small class="text-muted d-block">Data/Hora</small>
+                        <strong>{{ log.created_at.strftime('%d/%m/%Y %H:%M') if log.created_at else '—' }}</strong>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted d-block">Usuário</small>
+                        <strong>{{ log.username }}</strong>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted d-block">Ação</small>
+                        <span class="badge bg-{{ log.action_badge }}">{{ log.action_label }}</span>
+                    </div>
+                </div>
+
+                {% if log.attendance_id %}
+                <div class="mb-3">
+                    <small class="text-muted">Registro de Apontamento: <strong>#{{ log.attendance_id }}</strong></small>
+                </div>
+                {% endif %}
+
+                <!-- Changes Table -->
+                {% if log.changes %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 35%;">Campo</th>
+                                <th style="width: 32%;">Antes</th>
+                                <th style="width: 33%;">Depois</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for change in log.changes %}
+                            <tr>
+                                <td class="fw-bold">{{ change.field }}</td>
+                                <td class="{{ 'text-danger bg-danger-subtle' if log.is_update and change.changed else '' }}">
+                                    {{ change.before }}
+                                </td>
+                                <td class="{{ 'text-success bg-success-subtle' if log.is_update and change.changed else '' }}">
+                                    {{ change.after }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}

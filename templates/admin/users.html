@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Gerenciar Usuários{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-person-plus"></i> Novo Usuário</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.users') }}" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Usuário</label>
+                <input type="text" class="form-control" name="username" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Senha</label>
+                <input type="password" class="form-control" name="password" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Perfil</label>
+                <select class="form-select" name="role">
+                    <option value="LIDER">Líder</option>
+                    <option value="ADMIN">Administrador</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-person-plus"></i> Criar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-people"></i> Usuários Cadastrados</h5>
+    </div>
+    <div class="card-body table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Usuário</th>
+                    <th>Perfil</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.username }}</td>
+                    <td>
+                        <span class="badge bg-{{ 'danger' if user.role == 'ADMIN' else 'info' }}">
+                            {{ user.role }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if user.is_active %}
+                            <span class="badge bg-success">Ativo</span>
+                        {% else %}
+                            <span class="badge bg-danger">Inativo</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <form method="POST" action="{{ url_for('admin.toggle_user', user_id=user.id) }}" class="d-inline">
+                                <button type="submit" class="btn btn-{{ 'success' if not user.is_active else 'warning' }}">
+                                    <i class="bi bi-toggle-on"></i> {{ 'Ativar' if not user.is_active else 'Desativar' }}
+                                </button>
+                            </form>
+                            {% if user.id != current_user.id %}
+                            <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.id) }}" class="d-inline" onsubmit="return confirm('Excluir este usuário?');">
+                                <button type="submit" class="btn btn-danger">
+                                    <i class="bi bi-trash"></i> Excluir
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

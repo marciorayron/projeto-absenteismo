@@ -1,0 +1,633 @@
+{% extends "base.html" %}
+
+{% block title %}Operação - Controle de Ponto{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-person-check"></i> Registro de Presença</h1>
+    <div class="btn-group">
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-outline-primary">
+            <i class="bi bi-bar-chart"></i> Dashboard
+        </a>
+    </div>
+</div>
+
+<!-- Line Validation Status Banner -->
+{% if line_validation_status %}
+<div class="mb-4">
+    {% if line_validation_status.validated %}
+    <div class="alert alert-success d-flex align-items-center" role="alert">
+        <i class="bi bi-check-circle-fill me-2 fs-5"></i>
+        <div>
+            <strong>Linha Auditada</strong> —
+            Validada em {{ line_validation_status.validated_at }} por {{ line_validation_status.validated_by }}.
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-warning d-flex align-items-center" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+        <div>
+            <strong>⚠️ Status da Linha no Dia: Pendente de Validação</strong>
+            {% if not line_validation_status.has_employees %}
+            <br><small>Nenhum funcionário alocado nesta linha/turno para hoje.</small>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('leader.index') }}" class="row g-3" id="filterForm">
+            <div class="col-md-2">
+                <label class="form-label">Data</label>
+                <input type="date" class="form-control" name="date" value="{{ selected_date }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Turno</label>
+                <select class="form-select" name="shift" id="filterShift" data-placeholder="Todos">
+                    <option value="">Todos</option>
+                    {% for s in shifts %}
+                    <option value="{{ s }}" {% if selected_shift == s|string %}selected{% endif %}>Turno {{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Projeto</label>
+                <select class="form-select" name="project" id="filterProject" data-placeholder="Todos">
+                    <option value="">Todos</option>
+                    {% for p in projects %}
+                    <option value="{{ p }}" {% if selected_project == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Linha</label>
+                <select class="form-select" name="line" id="filterLine" data-placeholder="Todas">
+                    <option value="">Todas</option>
+                    {% for l in lines %}
+                    <option value="{{ l }}" {% if selected_line == l %}selected{% endif %}>{{ l }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label">Exibir</label>
+                <select class="form-select" name="per_page" id="perPageSelect">
+                    {% for n in [10, 25, 50, 100] %}
+                    <option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Buscar (Nome/ID)</label>
+                <input type="search" class="form-control" name="search" id="searchInput" placeholder="Nome ou ID..." value="{{ search }}">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <div class="d-grid gap-1 w-100">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-funnel"></i> Filtrar
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-action="clear-filters">
+                        <i class="bi bi-eraser"></i> Limpar
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Employee table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-people"></i> Funcionários ({{ total_items }} total{% if search %} — busca: "{{ search }}"{% endif %})</span>
+        <span class="badge bg-info">{{ selected_date }}</span>
+    </div>
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-hover align-middle" id="attendanceTable">
+            <thead>
+                <tr>
+                    <th style="width: 80px;">ID</th>
+                    <th>Nome</th>
+                    <th style="width: 80px;">Turno</th>
+                    <th>Projeto</th>
+                    <th>Linha</th>
+                    <th style="width: 130px;">Status</th>
+                    <th style="width: 280px;">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in employee_list %}
+                {% set shift_info = shift_schedules.get(item.allocation.shift, {}) %}
+                {% set is_closed = item.allocation.shift in closed_shift_ids %}
+                <tr data-employee-id="{{ item.employee.id }}"
+                    data-employee-name="{{ item.employee.name }}"
+                    data-shift="{{ item.allocation.shift }}"
+                    data-shift-start="{{ shift_info.start_time or '' }}"
+                    data-shift-end="{{ shift_info.end_time or '' }}"
+                    data-attendance-checkin="{{ item.attendance.check_in_time.strftime('%H:%M') if item.attendance and item.attendance.check_in_time else '' }}">
+                    <td>{{ item.employee.id }}</td>
+                    <td>{{ item.employee.name }}</td>
+                    <td><span class="badge bg-secondary">Turno {{ item.allocation.shift }}</span></td>
+                    <td>{{ item.allocation.project }}</td>
+                    <td>{{ item.allocation.line }}</td>
+                    <td class="status-cell">
+                        {% if item.attendance %}
+                            {% set type = item.attendance.event_type %}
+                            {% if type == 'PRESENT' %}
+                                <span class="badge bg-success">Presente</span>
+                            {% elif type == 'FULL_ABSENCE' %}
+                                <span class="badge bg-danger">Falta</span>
+                            {% elif type == 'VACATION' %}
+                                <span class="badge bg-warning text-dark">Férias</span>
+                            {% elif type == 'LATE_ARRIVAL' %}
+                                <span class="badge bg-warning">Atraso</span>
+                            {% elif type == 'EARLY_EXIT' %}
+                                <span class="badge bg-info">Saída Antecipada</span>
+                            {% endif %}
+                            <br><small class="text-muted">{{ item.attendance.minutes_lost }} min perdidos</small>
+                        {% else %}
+                            <span class="badge bg-success">Presente</span>
+                        {% endif %}
+                    </td>
+                    <td class="action-cell">
+                        {% if is_closed and current_user.role == 'LIDER' %}
+                        <span class="badge bg-secondary" title="Turno encerrado. Alterações requerem perfil ADMIN." style="font-size: 0.8rem;">🔒 Turno Encerrado</span>
+                        {% else %}
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button class="btn btn-danger quick-action-btn" data-event-type="FULL_ABSENCE" title="Falta">
+                                ❌
+                            </button>
+                            <button class="btn btn-warning quick-action-btn" data-event-type="VACATION" title="Férias">
+                                🏖️
+                            </button>
+                            <button class="btn btn-outline-warning quick-action-btn" data-event-type="LATE_ARRIVAL" data-needs-time="check_in" title="Atraso (informar horário)">
+                                ⏰
+                            </button>
+                            <button class="btn btn-outline-info quick-action-btn" data-event-type="EARLY_EXIT" data-needs-time="both" title="Saída Antecipada (informar horários)">
+                                🚪
+                            </button>
+                            <button class="btn btn-success quick-action-btn" data-event-type="PRESENT" title="Presente / Reset">
+                                🟢
+                            </button>
+                        </div>
+                        {% endif %}
+                        <button class="btn btn-outline-secondary btn-sm ms-1 history-btn" title="Histórico de Ausências">
+                            📄
+                        </button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted">
+                        <i class="bi bi-inbox display-6 d-block"></i>
+                        Nenhum funcionário encontrado com os filtros selecionados.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div class="card-footer d-flex justify-content-between align-items-center">
+        <span class="text-muted">
+            Mostrando {{ (page - 1) * per_page + 1 }}-{{ [page * per_page, total_items] | min }} de {{ total_items }}
+        </span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {{ 'disabled' if page == 1 else '' }}">
+                    <a class="page-link" href="{{ url_for('leader.index', date=selected_date, shift=selected_shift, project=selected_project, line=selected_line, search=search, page=1, per_page=per_page) }}">&laquo;</a>
+                </li>
+                <li class="page-item {{ 'disabled' if page == 1 else '' }}">
+                    <a class="page-link" href="{{ url_for('leader.index', date=selected_date, shift=selected_shift, project=selected_project, line=selected_line, search=search, page=page-1, per_page=per_page) }}">&lsaquo;</a>
+                </li>
+                {% for p in range(1, total_pages + 1) %}
+                    {% if p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+                    <li class="page-item {{ 'active' if p == page else '' }}">
+                        <a class="page-link" href="{{ url_for('leader.index', date=selected_date, shift=selected_shift, project=selected_project, line=selected_line, search=search, page=p, per_page=per_page) }}">{{ p }}</a>
+                    </li>
+                    {% elif p == page - 3 or p == page + 3 %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {{ 'disabled' if page == total_pages else '' }}">
+                    <a class="page-link" href="{{ url_for('leader.index', date=selected_date, shift=selected_shift, project=selected_project, line=selected_line, search=search, page=page+1, per_page=per_page) }}">&rsaquo;</a>
+                </li>
+                <li class="page-item {{ 'disabled' if page == total_pages else '' }}">
+                    <a class="page-link" href="{{ url_for('leader.index', date=selected_date, shift=selected_shift, project=selected_project, line=selected_line, search=search, page=total_pages, per_page=per_page) }}">&raquo;</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Validate Line Footer -->
+{% if can_validate and line_validation_status and not line_validation_status.validated %}
+<div class="card mt-4 border-warning">
+    <div class="card-body text-center">
+        <p class="mb-2 text-muted">Todos os funcionários desta linha/turno foram apontados?</p>
+        <button class="btn btn-warning btn-lg" id="validateLineBtn">
+            <i class="bi bi-lock-fill"></i> 🔒 Concluir e Auditar Apontamento do Dia
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<!-- Mini-Modal: Atraso (check-in time) -->
+<div class="modal fade" id="delayModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h6 class="modal-title"><i class="bi bi-clock"></i> Registrar Atraso</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="delayEmployeeId">
+                <div class="mb-3">
+                    <label class="form-label">Funcionário</label>
+                    <input type="text" class="form-control" id="delayEmployeeName" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Horário de Entrada <span class="text-danger">*</span></label>
+                    <input type="time" class="form-control" id="delayCheckIn" required>
+                </div>
+                <small class="text-muted">
+                    <i class="bi bi-info-circle"></i> Atraso até 5 min não perde tempo. Acima disso, minutos excedentes são contabilizados.
+                </small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-warning btn-sm" id="confirmDelay">Confirmar Atraso</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mini-Modal: Saída Antecipada (check-in + check-out) -->
+<div class="modal fade" id="exitModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h6 class="modal-title"><i class="bi bi-door-open"></i> Registrar Saída Antecipada</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="exitEmployeeId">
+                <div class="mb-3">
+                    <label class="form-label">Funcionário</label>
+                    <input type="text" class="form-control" id="exitEmployeeName" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Horário de Entrada <span class="text-danger">*</span></label>
+                    <input type="time" class="form-control" id="exitCheckIn" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Horário de Saída <span class="text-danger">*</span></label>
+                    <input type="time" class="form-control" id="exitCheckOut" required>
+                </div>
+                <small class="text-muted">
+                    <i class="bi bi-info-circle"></i> Saída com até 60 min após início do turno vira Falta Integral.
+                </small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-info btn-sm" id="confirmExit">Confirmar Saída</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick History Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h6 class="modal-title"><i class="bi bi-clock-history"></i> Histórico de Ausências</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="historyModalBody">
+                <div class="text-center text-muted py-4">
+                    <div class="spinner-border" role="status"></div>
+                    <p class="mt-2">Carregando histórico...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Fechar</button>
+                <a href="#" class="btn btn-primary btn-sm" id="historyFullLink" target="_blank">
+                    🔍 Ver Histórico Completo & Analytics
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/filters.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize shared filter utilities (cascading + clear + debounced search)
+    Filters.init({
+        apiEndpoint: '/api/cascade-options',
+        shiftSelectId: 'filterShift',
+        projectSelectId: 'filterProject',
+        lineSelectId: 'filterLine',
+        formId: 'filterForm',
+        searchInputId: 'searchInput',
+        debounceMs: 300,
+        multiSelect: false,
+        preserveSelections: true
+    });
+
+    const selectedDate = "{{ selected_date }}";
+    const selectedShift = "{{ selected_shift }}";
+    const selectedLine = "{{ selected_line }}";
+
+    // ========== Quick Action Buttons ==========
+    document.querySelectorAll('.quick-action-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const row = this.closest('tr');
+            const employeeId = row.dataset.employeeId;
+            const employeeName = row.dataset.employeeName;
+            const eventType = this.dataset.eventType;
+            const needsTime = this.dataset.needsTime;
+
+            if (!employeeId) return;
+
+            if (eventType === 'PRESENT') {
+                // Confirm reset or mark present
+                const existingBadge = row.querySelector('.status-cell .badge');
+                if (existingBadge && !existingBadge.classList.contains('bg-secondary')) {
+                    if (!confirm(`Deseja limpar o registro de "${employeeName}" (Resetar para "Não registrado")?`)) {
+                        return;
+                    }
+                    resetAttendance(employeeId, row);
+                } else {
+                    quickAction(employeeId, 'PRESENT', '', '', row);
+                }
+            } else if (eventType === 'FULL_ABSENCE') {
+                if (!confirm(`Confirmar FALTA para "${employeeName}"?`)) return;
+                quickAction(employeeId, 'FULL_ABSENCE', '', '', row);
+            } else if (eventType === 'VACATION') {
+                if (!confirm(`Confirmar FÉRIAS para "${employeeName}"?`)) return;
+                quickAction(employeeId, 'VACATION', '', '', row);
+            } else if (needsTime === 'check_in') {
+                // Open delay modal
+                document.getElementById('delayEmployeeId').value = employeeId;
+                document.getElementById('delayEmployeeName').value = employeeName;
+                document.getElementById('delayCheckIn').value = '';
+                const delayModal = new bootstrap.Modal(document.getElementById('delayModal'));
+                delayModal.show();
+                // Store row reference
+                document.getElementById('delayModal')._row = row;
+            } else if (needsTime === 'both') {
+                // Open exit modal
+                document.getElementById('exitEmployeeId').value = employeeId;
+                document.getElementById('exitEmployeeName').value = employeeName;
+                document.getElementById('exitCheckIn').value = '';
+                document.getElementById('exitCheckOut').value = '';
+                const exitModal = new bootstrap.Modal(document.getElementById('exitModal'));
+                exitModal.show();
+                document.getElementById('exitModal')._row = row;
+            }
+        });
+    });
+
+    // Confirm Delay button
+    document.getElementById('confirmDelay').addEventListener('click', function() {
+        const employeeId = document.getElementById('delayEmployeeId').value;
+        const checkIn = document.getElementById('delayCheckIn').value;
+        if (!checkIn) {
+            alert('Informe o horário de entrada.');
+            return;
+        }
+        const row = document.getElementById('delayModal')._row;
+        quickAction(employeeId, 'LATE_ARRIVAL', checkIn, '', row);
+        bootstrap.Modal.getInstance(document.getElementById('delayModal')).hide();
+    });
+
+    // Confirm Exit button
+    document.getElementById('confirmExit').addEventListener('click', function() {
+        const employeeId = document.getElementById('exitEmployeeId').value;
+        const checkIn = document.getElementById('exitCheckIn').value;
+        const checkOut = document.getElementById('exitCheckOut').value;
+        if (!checkIn || !checkOut) {
+            alert('Informe os horários de entrada e saída.');
+            return;
+        }
+        const row = document.getElementById('exitModal')._row;
+        quickAction(employeeId, 'EARLY_EXIT', checkIn, checkOut, row);
+        bootstrap.Modal.getInstance(document.getElementById('exitModal')).hide();
+    });
+
+    async function quickAction(employeeId, eventType, checkIn, checkOut, row) {
+        try {
+            const res = await fetch('/leader/api/quick-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    employee_id: employeeId,
+                    record_date: selectedDate,
+                    event_type: eventType,
+                    check_in: checkIn,
+                    check_out: checkOut
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                // Update status cell
+                const statusCell = row.querySelector('.status-cell');
+                if (statusCell) {
+                    statusCell.innerHTML = data.badge_html;
+                }
+                // Flash-like feedback
+                showToast('Registro salvo!', 'success');
+            } else {
+                alert('Erro: ' + (data.error || 'Erro desconhecido.'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Erro de conexão ao salvar registro.');
+        }
+    }
+
+    async function resetAttendance(employeeId, row) {
+        try {
+            const res = await fetch('/leader/api/reset-attendance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    employee_id: employeeId,
+                    record_date: selectedDate
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                const statusCell = row.querySelector('.status-cell');
+                if (statusCell) {
+                    statusCell.innerHTML = data.badge_html;
+                }
+                showToast('Registro removido.', 'info');
+            } else {
+                alert('Erro: ' + (data.error || 'Erro desconhecido.'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Erro de conexão ao resetar registro.');
+        }
+    }
+
+    function showToast(message, type) {
+        // Simple toast-like feedback
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type} position-fixed bottom-0 end-0 m-3 shadow`;
+        toast.style.zIndex = '9999';
+        toast.style.transition = 'opacity 0.5s';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 500);
+        }, 2000);
+    }
+
+    // ========== History Button ==========
+    const historyModalEl = document.getElementById('historyModal');
+    const historyModal = historyModalEl ? new bootstrap.Modal(historyModalEl) : null;
+
+    document.querySelectorAll('.history-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const row = this.closest('tr');
+            const employeeId = row.dataset.employeeId;
+            const employeeName = row.dataset.employeeName;
+
+            if (!employeeId || !historyModal) return;
+
+            // Reset modal body
+            document.getElementById('historyModalBody').innerHTML =
+                '<div class="text-center text-muted py-4"><div class="spinner-border" role="status"></div><p class="mt-2">Carregando...</p></div>';
+
+            // Update full link
+            const fullLink = document.getElementById('historyFullLink');
+            fullLink.href = `/leader/employee/${employeeId}/history`;
+
+            historyModal.show();
+
+            try {
+                const res = await fetch(`/leader/api/employee-quick-history/${employeeId}`);
+                if (!res.ok) throw new Error('Erro ao buscar');
+                const data = await res.json();
+
+                const emp = data.employee;
+                const alloc = data.allocation;
+                const bf = data.bradford;
+                const records = data.recent_absences;
+
+                let bfBadge;
+                if (bf.risk_level === 'high') {
+                    bfBadge = `<span class="badge bg-danger">🔴 Alto Risco — ${bf.bradford_score}</span>`;
+                } else if (bf.risk_level === 'moderate') {
+                    bfBadge = `<span class="badge bg-warning text-dark">🟡 Moderado — ${bf.bradford_score}</span>`;
+                } else {
+                    bfBadge = `<span class="badge bg-success">🟢 Baixo — ${bf.bradford_score}</span>`;
+                }
+
+                let allocInfo = alloc
+                    ? `Turno ${alloc.shift} | ${alloc.project || '-'} | ${alloc.line || '-'}`
+                    : 'Sem alocação ativa';
+
+                let tableRows = '';
+                if (records.length === 0) {
+                    tableRows = '<tr><td colspan="5" class="text-center text-muted">Nenhuma ausência registrada.</td></tr>';
+                } else {
+                    const labels = {
+                        'FULL_ABSENCE': 'Falta',
+                        'LATE_ARRIVAL': 'Atraso',
+                        'EARLY_EXIT': 'Saída Antecipada'
+                    };
+                    const colors = {
+                        'FULL_ABSENCE': '#dc3545',
+                        'LATE_ARRIVAL': '#ffc107',
+                        'EARLY_EXIT': '#0dcaf0'
+                    };
+
+                    records.forEach(r => {
+                        const label = labels[r.event_type] || r.event_type;
+                        const color = colors[r.event_type] || '#6c757d';
+                        const dateFmt = r.record_date ? r.record_date.split('-').reverse().join('/') : '—';
+                        const cin = r.check_in_time ? r.check_in_time.substring(0, 5) : '—';
+                        const cout = r.check_out_time ? r.check_out_time.substring(0, 5) : '—';
+
+                        tableRows += `<tr>
+                            <td>${dateFmt}</td>
+                            <td><span class="badge" style="background-color:${color}">${label}</span></td>
+                            <td>${cin}</td>
+                            <td>${cout}</td>
+                            <td>${r.minutes_lost} min</td>
+                        </tr>`;
+                    });
+                }
+
+                document.getElementById('historyModalBody').innerHTML = `
+                    <div class="mb-3">
+                        <strong>${emp.id}</strong> — ${emp.name}<br>
+                        <small class="text-muted">${allocInfo}</small>
+                    </div>
+                    <div class="mb-3">
+                        <strong>Bradford Factor:</strong> ${bfBadge}
+                        <small class="text-muted ms-2">S=${bf.spells} | D=${bf.total_days}</small>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Data</th><th>Tipo</th><th>Entrada</th><th>Saída</th><th>Min</th></tr></thead>
+                            <tbody>${tableRows}</tbody>
+                        </table>
+                    </div>
+                    <small class="text-muted">Últimas ${records.length} ocorrências.</small>
+                `;
+            } catch (err) {
+                console.error(err);
+                document.getElementById('historyModalBody').innerHTML =
+                    '<div class="alert alert-danger">Erro ao carregar histórico.</div>';
+            }
+        });
+    });
+
+    // ========== Validate Line Button ==========
+    const validateBtn = document.getElementById('validateLineBtn');
+    if (validateBtn) {
+        validateBtn.addEventListener('click', async function() {
+            if (!confirm('Confirma a auditoria desta linha para o dia? Esta ação registrará que todos os apontamentos foram conferidos.')) {
+                return;
+            }
+            try {
+                const res = await fetch('/leader/api/validate-line', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        record_date: selectedDate,
+                        line: selectedLine,
+                        shift: selectedShift
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    alert('Erro: ' + (data.error || 'Erro desconhecido.'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Erro de conexão ao auditar linha.');
+            }
+        });
+    }
+});
+</script>
+<script src="{{ url_for('static', filename='js/leader.js') }}"></script>
+{% endblock %}

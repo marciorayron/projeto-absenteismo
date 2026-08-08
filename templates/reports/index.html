@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Relatórios de Ausências{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-file-earmark-text"></i> Relatórios de Ausências</h1>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('reports.index') }}" class="row g-3" id="filterForm">
+            <div class="col-md-2">
+                <label class="form-label">Data Início</label>
+                <input type="date" class="form-control" name="date_from" value="{{ date_from }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Data Fim</label>
+                <input type="date" class="form-control" name="date_to" value="{{ date_to }}">
+            </div>
+            <div class="col-md-1">
+                <label class="form-label">Turno</label>
+                <select class="form-select" name="shift" id="filterShift" data-placeholder="Todos">
+                    <option value="">Todos</option>
+                    {% for s in shifts %}
+                    <option value="{{ s }}" {% if selected_shift == s|string %}selected{% endif %}>Turno {{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label">Projeto</label>
+                <select class="form-select" name="project" id="filterProject" data-placeholder="Todos">
+                    <option value="">Todos</option>
+                    {% for p in projects %}
+                    <option value="{{ p }}" {% if selected_project == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label">Linha</label>
+                <select class="form-select" name="line" id="filterLine" data-placeholder="Todas">
+                    <option value="">Todas</option>
+                    {% for l in lines %}
+                    <option value="{{ l }}" {% if selected_line == l %}selected{% endif %}>{{ l }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Tipo de Evento</label>
+                <select class="form-select" name="event_type">
+                    <option value="">Todos</option>
+                    {% for et in event_types %}
+                    <option value="{{ et }}" {% if selected_event_type == et %}selected{% endif %}>{{ event_labels.get(et, et) }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Buscar (Nome/ID)</label>
+                <input type="search" class="form-control" name="search" id="searchInput" placeholder="Nome ou ID..." value="{{ search }}">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <div class="d-grid gap-1 w-100">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-funnel"></i> Filtrar
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-action="clear-filters">
+                        <i class="bi bi-eraser"></i> Limpar
+                    </button>
+                </div>
+            </div>
+        </form>
+        <div class="mt-3 d-flex justify-content-end">
+            <a href="{{ url_for('reports.export_excel', date_from=date_from, date_to=date_to, shift=selected_shift, project=selected_project, line=selected_line, event_type=selected_event_type, search=search) }}" class="btn btn-success btn-sm">
+                <i class="bi bi-file-earmark-spreadsheet"></i> Exportar Excel
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Results table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list-ul"></i> Registros de Ausência ({{ pagination.total }} total)</span>
+        <span class="text-muted small">{{ date_from }} a {{ date_to }}</span>
+    </div>
+    <div class="card-body table-responsive p-0">
+        <table class="table table-striped table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 100px;">Data</th>
+                    <th style="width: 80px;">ID</th>
+                    <th>Nome</th>
+                    <th style="width: 70px;">Turno</th>
+                    <th>Projeto</th>
+                    <th>Linha</th>
+                    <th style="width: 130px;">Tipo</th>
+                    <th style="width: 80px;">Minutos</th>
+                    <th style="width: 120px;">Horários</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in records %}
+                <tr>
+                    <td>{{ r.record_date.split('-')[2] }}/{{ r.record_date.split('-')[1] }}/{{ r.record_date.split('-')[0] if r.record_date else '—' }}</td>
+                    <td>{{ r.employee_id }}</td>
+                    <td>{{ r.employee_name }}</td>
+                    <td><span class="badge bg-secondary">{{ r.shift }}</span></td>
+                    <td>{{ r.project }}</td>
+                    <td>{{ r.line }}</td>
+                    <td><span class="badge bg-{{ r.event_color }}">{{ r.event_label }}</span></td>
+                    <td>{{ r.minutes_lost }} min</td>
+                    <td>
+                        <small>
+                            {% if r.check_in_time %}
+                            {{ r.check_in_time[:5] }}
+                            {% else %}—{% endif %}
+                            /
+                            {% if r.check_out_time %}
+                            {{ r.check_out_time[:5] }}
+                            {% else %}—{% endif %}
+                        </small>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="9" class="text-center text-muted py-4">
+                        <i class="bi bi-inbox display-6 d-block"></i>
+                        Nenhum registro de ausência encontrado com os filtros selecionados.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="card-footer d-flex justify-content-between align-items-center">
+        <span class="text-muted">
+            Mostrando {{ (pagination.page - 1) * pagination.per_page + 1 }}-{{ [pagination.page * pagination.per_page, pagination.total] | min }} de {{ pagination.total }}
+        </span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+                {% set args = '&shift=' + selected_shift + '&project=' + selected_project + '&line=' + selected_line + '&event_type=' + selected_event_type + '&search=' + search + '&date_from=' + date_from + '&date_to=' + date_to %}
+                <li class="page-item {{ 'disabled' if pagination.page == 1 else '' }}">
+                    <a class="page-link" href="{{ url_for('reports.index', page=1, per_page=pagination.per_page) }}{{ args }}">&laquo;</a>
+                </li>
+                <li class="page-item {{ 'disabled' if pagination.page == 1 else '' }}">
+                    <a class="page-link" href="{{ url_for('reports.index', page=pagination.page-1, per_page=pagination.per_page) }}{{ args }}">&lsaquo;</a>
+                </li>
+                {% for p in range(1, pagination.pages + 1) %}
+                    {% if p == 1 or p == pagination.pages or (p >= pagination.page - 2 and p <= pagination.page + 2) %}
+                    <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                        <a class="page-link" href="{{ url_for('reports.index', page=p, per_page=pagination.per_page) }}{{ args }}">{{ p }}</a>
+                    </li>
+                    {% elif p == pagination.page - 3 or p == pagination.page + 3 %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {{ 'disabled' if pagination.page == pagination.pages else '' }}">
+                    <a class="page-link" href="{{ url_for('reports.index', page=pagination.page+1, per_page=pagination.per_page) }}{{ args }}">&rsaquo;</a>
+                </li>
+                <li class="page-item {{ 'disabled' if pagination.page == pagination.pages else '' }}">
+                    <a class="page-link" href="{{ url_for('reports.index', page=pagination.pages, per_page=pagination.per_page) }}{{ args }}">&raquo;</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/filters.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    Filters.init({
+        apiEndpoint: '/api/cascade-options',
+        shiftSelectId: 'filterShift',
+        projectSelectId: 'filterProject',
+        lineSelectId: 'filterLine',
+        formId: 'filterForm',
+        searchInputId: 'searchInput',
+        debounceMs: 300,
+        multiSelect: false,
+        preserveSelections: true
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Excel{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-cloud-upload"></i> Upload de Planilha</h1>
+    <a href="{{ url_for('admin.admin_home') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <div class="card shadow">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-earmark-excel"></i> Enviar arquivo .xlsx</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data" action="{{ url_for('admin.upload') }}">
+                    <div class="mb-3">
+                        <label for="excel_file" class="form-label">Arquivo Excel</label>
+                        <input type="file" class="form-control" id="excel_file" name="excel_file" accept=".xlsx" required>
+                        <small class="text-muted">Colunas esperadas: ID, Nome, Turno, Projeto, Linha</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-cloud-arrow-up"></i> Processar Upload
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Instruções</h5>
+            </div>
+            <div class="card-body">
+                <p>O upload de planilha <strong>nunca sobrescreve</strong> registros históricos.</p>
+                <ul>
+                    <li>Funcionários existentes são <strong>atualizados</strong> (nome ou alocação).</li>
+                    <li>Alterações de turno/projeto/linha criam um novo registro de alocação com <code>start_date</code> e <code>end_date</code>.</li>
+                    <li>Novos funcionários são <strong>criados automaticamente</strong>.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}Gestão de Turnos - Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-clock"></i> Gestão de Turnos</h1>
+    <div>
+        <button type="button" class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#shiftModal" id="btnAddShift">
+            <i class="bi bi-plus-circle"></i> Novo Turno
+        </button>
+        <a href="{{ url_for('admin.admin_home') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Painel Admin
+        </a>
+    </div>
+</div>
+
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<!-- Shifts Table -->
+<div class="card shadow">
+    <div class="card-header">
+        <strong>Turnos Configurados</strong>
+        <span class="text-muted ms-2">— {{ shifts|length }} turno(s)</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Nome</th>
+                        <th>Horário</th>
+                        <th>Pausa</th>
+                        <th>Horas Líquidas</th>
+                        <th>Tipo</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if shifts %}
+                        {% for s in shifts %}
+                        <tr>
+                            <td><strong>#{{ s.id }}</strong></td>
+                            <td>{{ s.name }}</td>
+                            <td><code>{{ s.schedule_str }}</code></td>
+                            <td>{{ s.break_minutes }} min</td>
+                            <td><strong>{{ s.net_hours_str }}</strong></td>
+                            <td>
+                                {% if s.is_overnight %}
+                                    <span class="badge bg-info text-dark">🌙 Noturno</span>
+                                {% else %}
+                                    <span class="badge bg-light text-dark">☀️ Diurno</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if s.is_active %}
+                                    <span class="badge bg-success">Ativo</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Inativo</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary me-1 btn-edit-shift"
+                                        data-id="{{ s.id }}"
+                                        data-name="{{ s.name }}"
+                                        data-start="{{ s.start_time }}"
+                                        data-end="{{ s.end_time }}"
+                                        data-break="{{ s.break_minutes }}"
+                                        data-bs-toggle="modal" data-bs-target="#shiftModal">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <form method="POST" action="{{ url_for('admin.shifts_toggle', shift_id=s.id) }}"
+                                      style="display:inline;">
+                                    <button class="btn btn-sm btn-outline-warning">
+                                        {% if s.is_active %}
+                                            <i class="bi bi-toggle-on"></i> Desativar
+                                        {% else %}
+                                            <i class="bi bi-toggle-off"></i> Ativar
+                                        {% endif %}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">
+                                Nenhum turno configurado. Clique em "Novo Turno" para criar.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Shift Modal -->
+<div class="modal fade" id="shiftModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('admin.shifts_add') }}" id="shiftForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="shiftModalTitle">
+                        <i class="bi bi-plus-circle"></i> Novo Turno
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3" id="divShiftId">
+                        <label class="form-label">ID do Turno</label>
+                        <input type="number" class="form-control" name="id" id="shiftId"
+                               min="1" max="99" placeholder="Ex: 5" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nome</label>
+                        <input type="text" class="form-control" name="name" id="shiftName"
+                               placeholder="Ex: 5º Turno" required>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label class="form-label">Hora Início</label>
+                            <input type="time" class="form-control" name="start_time" id="shiftStart"
+                                   required oninput="recalcPreview()">
+                        </div>
+                        <div class="col">
+                            <label class="form-label">Hora Fim</label>
+                            <input type="time" class="form-control" name="end_time" id="shiftEnd"
+                                   required oninput="recalcPreview()">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Minutos de Pausa</label>
+                        <input type="number" class="form-control" name="break_minutes" id="shiftBreak"
+                               min="0" max="240" value="60" required oninput="recalcPreview()">
+                    </div>
+                    <div class="alert alert-info mb-0" id="previewBox" style="display:none;">
+                        <strong>Prévia:</strong>
+                        <span id="previewHours">--</span>
+                        <span id="previewOvernight" class="ms-2"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="shiftSubmitBtn">
+                        <i class="bi bi-check-lg"></i> Salvar Turno
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Edit button click — populate modal with existing data
+    document.querySelectorAll('.btn-edit-shift').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const id = this.dataset.id;
+            const name = this.dataset.name;
+            const start = this.dataset.start;
+            const end = this.dataset.end;
+            const brk = this.dataset.break;
+
+            document.getElementById('shiftModalTitle').innerHTML =
+                '<i class="bi bi-pencil"></i> Editar Turno #' + id;
+            document.getElementById('shiftForm').action = '/admin/shifts/edit/' + id;
+            document.getElementById('divShiftId').style.display = 'none';
+            document.getElementById('shiftId').removeAttribute('required');
+            document.getElementById('shiftName').value = name;
+            document.getElementById('shiftStart').value = start;
+            document.getElementById('shiftEnd').value = end;
+            document.getElementById('shiftBreak').value = brk;
+            document.getElementById('shiftSubmitBtn').innerHTML =
+                '<i class="bi bi-check-lg"></i> Atualizar Turno';
+            recalcPreview();
+        });
+    });
+
+    // Reset modal for "Add" mode
+    document.getElementById('btnAddShift').addEventListener('click', function() {
+        document.getElementById('shiftModalTitle').innerHTML =
+            '<i class="bi bi-plus-circle"></i> Novo Turno';
+        document.getElementById('shiftForm').action = '/admin/shifts/add';
+        document.getElementById('divShiftId').style.display = 'block';
+        document.getElementById('shiftId').setAttribute('required', '');
+        document.getElementById('shiftId').value = '';
+        document.getElementById('shiftName').value = '';
+        document.getElementById('shiftStart').value = '';
+        document.getElementById('shiftEnd').value = '';
+        document.getElementById('shiftBreak').value = '60';
+        document.getElementById('shiftSubmitBtn').innerHTML =
+            '<i class="bi bi-check-lg"></i> Salvar Turno';
+        document.getElementById('previewBox').style.display = 'none';
+    });
+
+    // Live preview of net working hours
+    function recalcPreview() {
+        const startVal = document.getElementById('shiftStart').value;
+        const endVal = document.getElementById('shiftEnd').value;
+        const breakMin = parseInt(document.getElementById('shiftBreak').value) || 0;
+
+        const previewBox = document.getElementById('previewBox');
+        const previewHours = document.getElementById('previewHours');
+        const previewOvernight = document.getElementById('previewOvernight');
+
+        if (!startVal || !endVal) {
+            previewBox.style.display = 'none';
+            return;
+        }
+
+        const [sh, sm] = startVal.split(':').map(Number);
+        const [eh, em] = endVal.split(':').map(Number);
+        let startMin = sh * 60 + sm;
+        let endMin = eh * 60 + em;
+
+        let overnight = false;
+        if (endMin <= startMin) {
+            endMin += 24 * 60;
+            overnight = true;
+        }
+
+        let netMin = (endMin - startMin) - breakMin;
+        if (netMin < 0) netMin = 0;
+
+        const h = Math.floor(netMin / 60);
+        const m = netMin % 60;
+
+        previewBox.style.display = 'block';
+        previewHours.textContent = h + 'h' + String(m).padStart(2, '0') + 'm líquidas';
+        previewOvernight.innerHTML = overnight
+            ? '<span class="badge bg-info text-dark">🌙 Noturno (vira o dia)</span>'
+            : '<span class="badge bg-light text-dark">☀️ Diurno</span>';
+    }
+</script>
+{% endblock %}

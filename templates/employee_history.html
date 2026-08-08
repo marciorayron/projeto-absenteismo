@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico de Ausências - {{ employee.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1><i class="bi bi-clock-history"></i> Histórico de Ausências</h1>
+    <a href="{{ url_for('leader.index') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+</div>
+
+<!-- Employee Profile Card -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-person-badge"></i> {{ employee.id }} — {{ employee.name }}
+                </h5>
+                {% if allocation %}
+                <div class="row mt-3">
+                    <div class="col-md-4">
+                        <span class="text-muted">Turno:</span>
+                        <span class="badge bg-secondary">Turno {{ allocation.shift }}</span>
+                    </div>
+                    <div class="col-md-4">
+                        <span class="text-muted">Projeto:</span>
+                        <strong>{{ allocation.project }}</strong>
+                    </div>
+                    <div class="col-md-4">
+                        <span class="text-muted">Linha:</span>
+                        <strong>{{ allocation.line }}</strong>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-muted mt-3">Funcionário sem alocação ativa.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card {% if bradford.risk_level == 'high' %}border-danger{% elif bradford.risk_level == 'moderate' %}border-warning{% else %}border-success{% endif %}">
+            <div class="card-body text-center">
+                <h6 class="text-muted mb-2">Bradford Factor</h6>
+                <h2 class="display-4 mb-1 {% if bradford.risk_level == 'high' %}text-danger{% elif bradford.risk_level == 'moderate' %}text-warning{% else %}text-success{% endif %}">
+                    {{ bradford.bradford_score }}
+                </h2>
+                <span class="badge {% if bradford.risk_level == 'high' %}bg-danger{% elif bradford.risk_level == 'moderate' %}bg-warning text-dark{% else %}bg-success{% endif %} fs-6 mb-2">
+                    {% if bradford.risk_level == 'high' %}🔴 Alto Risco{% elif bradford.risk_level == 'moderate' %}🟡 Risco Moderado{% else %}🟢 Baixo Risco{% endif %}
+                </span>
+                <div class="d-flex justify-content-around mt-2">
+                    <div>
+                        <small class="text-muted d-block">Ocorrências (S)</small>
+                        <strong>{{ bradford.spells }}</strong>
+                    </div>
+                    <div>
+                        <small class="text-muted d-block">Dias (D)</small>
+                        <strong>{{ bradford.total_days }}</strong>
+                    </div>
+                </div>
+                <small class="text-muted d-block mt-1">B = S² × D</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form class="row g-3" id="historyFilterForm">
+            <div class="col-md-3">
+                <label class="form-label">Data Início</label>
+                <input type="date" class="form-control" id="filterDateFrom">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Data Fim</label>
+                <input type="date" class="form-control" id="filterDateTo">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Tipo de Evento</label>
+                <select class="form-select" id="filterEventType">
+                    <option value="">Todos</option>
+                    <option value="FULL_ABSENCE">Falta Integral</option>
+                    <option value="LATE_ARRIVAL">Atraso</option>
+                    <option value="EARLY_EXIT">Saída Antecipada</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-funnel"></i> Filtrar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-pie-chart"></i> Distribuição de Tipos de Ausência</div>
+            <div class="card-body">
+                <canvas id="absenceTypeChart" height="280"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-graph-up"></i> Tendência Mensal de Minutos Perdidos</div>
+            <div class="card-body">
+                <canvas id="monthlyTrendChart" height="280"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Summary Cards Row -->
+<div class="row mb-4" id="summaryCards">
+    <div class="col-md-3">
+        <div class="card bg-light">
+            <div class="card-body text-center">
+                <h6 class="text-muted">Total de Ocorrências</h6>
+                <h3 id="summaryTotalRecords">--</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-light">
+            <div class="card-body text-center">
+                <h6 class="text-muted">Horas Perdidas</h6>
+                <h3 id="summaryLostHours">--</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-light">
+            <div class="card-body text-center">
+                <h6 class="text-muted">Minutos Perdidos</h6>
+                <h3 id="summaryLostMinutes">--</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-light">
+            <div class="card-body text-center">
+                <h6 class="text-muted">Faltas / Atrasos / Saídas</h6>
+                <h5 id="summaryBreakdown">--</h5>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Absence Log Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-table"></i> Registros de Ausências</span>
+        <div>
+            <button class="btn btn-outline-success btn-sm" id="exportCsvBtn">
+                <i class="bi bi-download"></i> Exportar CSV
+            </button>
+        </div>
+    </div>
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-hover align-middle" id="absenceTable">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Tipo de Evento</th>
+                    <th>Entrada Real</th>
+                    <th>Saída Real</th>
+                    <th>Minutos Perdidos</th>
+                    <th>Registrado Por</th>
+                </tr>
+            </thead>
+            <tbody id="absenceTableBody">
+                <tr>
+                    <td colspan="6" class="text-center text-muted">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        Carregando...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <!-- Pagination -->
+    <div class="card-footer d-flex justify-content-between align-items-center" id="paginationContainer" style="display: none;">
+        <span class="text-muted" id="paginationInfo"></span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0" id="paginationLinks"></ul>
+        </nav>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const employeeId = "{{ employee.id }}";
+const oneYearAgo = new Date();
+oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+document.getElementById('filterDateFrom').value = oneYearAgo.toISOString().split('T')[0];
+document.getElementById('filterDateTo').value = new Date().toISOString().split('T')[0];
+
+let absenceTypeChart = null;
+let monthlyTrendChart = null;
+let allRecords = [];
+let currentPage = 1;
+let totalPages = 1;
+
+const EVENT_LABELS = {
+    'FULL_ABSENCE': 'Falta Integral',
+    'LATE_ARRIVAL': 'Atraso',
+    'EARLY_EXIT': 'Saída Antecipada'
+};
+
+const EVENT_COLORS = {
+    'FULL_ABSENCE': '#dc3545',
+    'LATE_ARRIVAL': '#ffc107',
+    'EARLY_EXIT': '#0dcaf0'
+};
+
+document.getElementById('historyFilterForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    currentPage = 1;
+    fetchData();
+});
+
+document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+
+async function fetchData() {
+    const dateFrom = document.getElementById('filterDateFrom').value;
+    const dateTo = document.getElementById('filterDateTo').value;
+    const eventType = document.getElementById('filterEventType').value;
+
+    const params = new URLSearchParams({
+        date_from: dateFrom,
+        date_to: dateTo,
+        page: currentPage,
+        per_page: 25
+    });
+    if (eventType) params.set('event_type', eventType);
+
+    try {
+        const res = await fetch(`/leader/api/employee-history-data/${employeeId}?${params}`);
+        if (!res.ok) throw new Error('Erro ao buscar dados');
+        const data = await res.json();
+
+        // Save records for CSV export
+        allRecords = data.records;
+
+        // Update summary
+        document.getElementById('summaryTotalRecords').textContent = data.summary.total_records;
+        document.getElementById('summaryLostHours').textContent = data.summary.total_lost_hours;
+        document.getElementById('summaryLostMinutes').textContent = data.summary.total_lost_minutes;
+        document.getElementById('summaryBreakdown').textContent =
+            `${data.summary.count_absence} / ${data.summary.count_delay} / ${data.summary.count_exit}`;
+
+        // Render charts
+        renderAbsenceTypeChart(data.summary);
+        renderMonthlyTrendChart(data.monthly_trend);
+
+        // Render table
+        renderTable(data.records);
+        renderPagination(data.pagination);
+
+    } catch (err) {
+        console.error(err);
+        document.getElementById('absenceTableBody').innerHTML =
+            '<tr><td colspan="6" class="text-center text-danger">Erro ao carregar dados.</td></tr>';
+    }
+}
+
+function renderAbsenceTypeChart(summary) {
+    const ctx = document.getElementById('absenceTypeChart').getContext('2d');
+    if (absenceTypeChart) absenceTypeChart.destroy();
+
+    absenceTypeChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Faltas Integrais', 'Atrasos', 'Saídas Antecipadas'],
+            datasets: [{
+                data: [summary.count_absence, summary.count_delay, summary.count_exit],
+                backgroundColor: ['#dc3545', '#ffc107', '#0dcaf0'],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+}
+
+function renderMonthlyTrendChart(monthlyTrend) {
+    const ctx = document.getElementById('monthlyTrendChart').getContext('2d');
+    if (monthlyTrendChart) monthlyTrendChart.destroy();
+
+    const labels = monthlyTrend.map(m => m.month);
+    const values = monthlyTrend.map(m => m.lost_minutes);
+
+    monthlyTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Minutos Perdidos',
+                data: values,
+                borderColor: '#0d6efd',
+                backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Minutos' }
+                },
+                x: {
+                    title: { display: true, text: 'Mês' }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                }
+            }
+        }
+    });
+}
+
+function renderTable(records) {
+    const tbody = document.getElementById('absenceTableBody');
+    if (records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Nenhum registro encontrado.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = records.map(r => {
+        const label = EVENT_LABELS[r.event_type] || r.event_type;
+        const color = EVENT_COLORS[r.event_type] || '#6c757d';
+        const checkIn = r.check_in_time ? r.check_in_time.substring(0, 5) : '—';
+        const checkOut = r.check_out_time ? r.check_out_time.substring(0, 5) : '—';
+        const dateFormatted = r.record_date ? r.record_date.split('-').reverse().join('/') : '—';
+
+        return `<tr>
+            <td>${dateFormatted}</td>
+            <td><span class="badge" style="background-color:${color}">${label}</span></td>
+            <td>${checkIn}</td>
+            <td>${checkOut}</td>
+            <td>${r.minutes_lost}</td>
+            <td>${r.registered_by}</td>
+        </tr>`;
+    }).join('');
+}
+
+function renderPagination(pagination) {
+    const container = document.getElementById('paginationContainer');
+    const info = document.getElementById('paginationInfo');
+    const links = document.getElementById('paginationLinks');
+
+    totalPages = pagination.total_pages;
+    currentPage = pagination.page;
+
+    if (totalPages <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    const start = (pagination.page - 1) * pagination.per_page + 1;
+    const end = Math.min(pagination.page * pagination.per_page, pagination.total_items);
+    info.textContent = `Mostrando ${start}-${end} de ${pagination.total_items}`;
+
+    let html = '';
+    // Previous
+    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" data-page="${currentPage - 1}">&laquo;</a></li>`;
+
+    for (let p = 1; p <= totalPages; p++) {
+        if (p === 1 || p === totalPages || (p >= currentPage - 2 && p <= currentPage + 2)) {
+            html += `<li class="page-item ${p === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" data-page="${p}">${p}</a></li>`;
+        } else if (p === currentPage - 3 || p === currentPage + 3) {
+            html += '<li class="page-item disabled"><span class="page-link">…</span></li>';
+        }
+    }
+
+    // Next
+    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" data-page="${currentPage + 1}">&raquo;</a></li>`;
+
+    links.innerHTML = html;
+
+    // Attach click handlers
+    links.querySelectorAll('a.page-link').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const page = parseInt(this.dataset.page);
+            if (page >= 1 && page <= totalPages) {
+                currentPage = page;
+                fetchData();
+            }
+        });
+    });
+}
+
+function exportCsv() {
+    // Refetch all records without pagination for full export
+    const dateFrom = document.getElementById('filterDateFrom').value;
+    const dateTo = document.getElementById('filterDateTo').value;
+    const eventType = document.getElementById('filterEventType').value;
+
+    const params = new URLSearchParams({
+        date_from: dateFrom,
+        date_to: dateTo,
+        page: 1,
+        per_page: 10000
+    });
+    if (eventType) params.set('event_type', eventType);
+
+    fetch(`/leader/api/employee-history-data/${employeeId}?${params}`)
+        .then(res => res.json())
+        .then(data => {
+            const rows = data.records;
+            let csv = 'Data,Tipo de Evento,Entrada Real,Saída Real,Minutos Perdidos,Registrado Por\n';
+            rows.forEach(r => {
+                const label = EVENT_LABELS[r.event_type] || r.event_type;
+                const checkIn = r.check_in_time ? r.check_in_time.substring(0, 5) : '';
+                const checkOut = r.check_out_time ? r.check_out_time.substring(0, 5) : '';
+                const dateFormatted = r.record_date ? r.record_date.split('-').reverse().join('/') : '';
+                csv += `${dateFormatted},${label},${checkIn},${checkOut},${r.minutes_lost},${r.registered_by}\n`;
+            });
+
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ausencias_${employeeId}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        })
+        .catch(err => console.error('Export error:', err));
+}
+
+// Initial load
+fetchData();
+</script>
+{% endblock %}

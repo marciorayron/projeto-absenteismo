@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Painel Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-speedometer2"></i> Painel Administrativo</h1>
+    <a href="{{ url_for('admin.upload') }}" class="btn btn-success">
+        <i class="bi bi-cloud-upload"></i> Upload Excel
+    </a>
+</div>
+
+<!-- KPI cards -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-primary shadow">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-people"></i> Funcionários Ativos</h6>
+                <h2 class="mb-0">{{ stats.total_employees }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-success shadow">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-briefcase"></i> Alocações Ativas</h6>
+                <h2 class="mb-0">{{ stats.active_allocations }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-warning shadow">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-clock-history"></i> Minutos Perdidos</h6>
+                <h2 class="mb-0">{{ stats.total_lost_minutes }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-info shadow">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-calendar-check"></i> Registros Hoje</h6>
+                <h2 class="mb-0">{{ stats.today_attendances }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick actions -->
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-cloud-upload display-4 text-primary"></i>
+                <h5 class="mt-2">Upload de Planilha</h5>
+                <p class="text-muted">Processar arquivo Excel com dados de funcionários</p>
+                <a href="{{ url_for('admin.upload') }}" class="btn btn-primary">Acessar</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-bar-chart display-4 text-success"></i>
+                <h5 class="mt-2">Dashboard Analítico</h5>
+                <p class="text-muted">Métricas de absenteísmo por linha, turno e projeto</p>
+                <a href="{{ url_for('dashboard.index') }}" class="btn btn-success">Acessar</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-person-check display-4 text-info"></i>
+                <h5 class="mt-2">Registro de Presença</h5>
+                <p class="text-muted">Marcar presença, faltas, atrasos e saídas</p>
+                <a href="{{ url_for('leader.index') }}" class="btn btn-info">Acessar</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User management, audit, and shifts -->
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-people display-4 text-warning"></i>
+                <h5 class="mt-2">Gerenciar Usuários</h5>
+                <p class="text-muted">Criar, ativar e desativar usuários do sistema</p>
+                <a href="{{ url_for('admin.users') }}" class="btn btn-warning">Acessar</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-clock display-4 text-dark"></i>
+                <h5 class="mt-2">Gestão de Turnos</h5>
+                <p class="text-muted">Configurar horários, pausas e turnos noturnos</p>
+                <a href="{{ url_for('admin.shifts') }}" class="btn btn-dark">Acessar</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-journal-text display-4 text-danger"></i>
+                <h5 class="mt-2">Log de Auditoria</h5>
+                <p class="text-muted">Visualizar histórico de alterações no sistema</p>
+                <a href="{{ url_for('admin.audit') }}" class="btn btn-danger">Acessar</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
