@@ -80,6 +80,8 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        from migrate import ensure_schema
+        ensure_schema()
         from seed import create_initial_users
         create_initial_users(app)
 

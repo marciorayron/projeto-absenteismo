@@ -112,10 +112,16 @@ def index():
 
     employee_list = []
     for alloc, emp in pagination.items:
+        on_vacation = (
+            emp.vacation_start is not None
+            and emp.vacation_end is not None
+            and emp.vacation_start <= parsed_date <= emp.vacation_end
+        )
         employee_list.append({
             'allocation': alloc,
             'employee': emp,
-            'attendance': attendance_map.get(emp.id)
+            'attendance': attendance_map.get(emp.id),
+            'on_vacation': on_vacation
         })
 
     # Line validation status
@@ -306,6 +312,8 @@ def api_quick_action():
     event_type = data.get('event_type')
     check_in = data.get('check_in', '')
     check_out = data.get('check_out', '')
+    justification_type = data.get('justification_type')
+    notes = data.get('notes', '').strip() or None
 
     if not employee_id or not record_date_str or not event_type:
         return jsonify({'success': False, 'error': 'Dados obrigatórios ausentes.'}), 400
@@ -356,6 +364,8 @@ def api_quick_action():
         existing.check_out_time = check_out_time
         existing.minutes_lost = minutes_lost
         existing.registered_by_id = current_user.id
+        existing.justification_type = justification_type
+        existing.notes = notes
 
         db.session.add(AuditLog(
             attendance_id=existing.id,
@@ -374,7 +384,9 @@ def api_quick_action():
             check_in_time=check_in_time,
             check_out_time=check_out_time,
             minutes_lost=minutes_lost,
-            registered_by_id=current_user.id
+            registered_by_id=current_user.id,
+            justification_type=justification_type,
+            notes=notes
         )
         db.session.add(attendance)
         db.session.flush()
@@ -435,6 +447,60 @@ def api_reset_attendance():
         'success': True,
         'badge_html': '<span class="badge bg-secondary">Não registrado</span>'
     })
+
+
+@leader_bp.route('/api/set-vacation', methods=['POST'])
+@login_required
+def api_set_vacation():
+    """Set or clear an employee's vacation period (date range)."""
+    if current_user.role not in ['LIDER', 'ADMIN']:
+        return jsonify({'success': False, 'error': 'Permissão negada.'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Dados inválidos.'}), 400
+
+    employee_id = data.get('employee_id')
+    vacation_start = (data.get('vacation_start') or '').strip()
+    vacation_end = (data.get('vacation_end') or '').strip()
+
+    if not employee_id:
+        return jsonify({'success': False, 'error': 'Funcionário obrigatório.'}), 400
+
+    emp = Employee.query.get(employee_id)
+    if not emp:
+        return jsonify({'success': False, 'error': 'Funcionário não encontrado.'}), 404
+
+    def _parse_date(value):
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except ValueError:
+            return False
+
+    start = _parse_date(vacation_start)
+    end = _parse_date(vacation_end)
+
+    if start is False or end is False:
+        return jsonify({'success': False, 'error': 'Data inválida.'}), 400
+
+    if (start and not end) or (end and not start):
+        return jsonify({'success': False, 'error': 'Informe as duas datas (início e fim).'}), 400
+
+    if start and end and start > end:
+        return jsonify({'success': False, 'error': 'A data de início não pode ser posterior à de fim.'}), 400
+
+    emp.vacation_start = start
+    emp.vacation_end = end
+    db.session.commit()
+
+    if start and end:
+        message = f'Férias definidas de {start} a {end}.'
+    else:
+        message = 'Período de férias removido.'
+
+    return jsonify({'success': True, 'message': message})
 
 
 @leader_bp.route('/api/validate-line', methods=['POST'])

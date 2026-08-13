@@ -244,15 +244,29 @@ def api_by_line():
         if not emp_ids:
             return jsonify({'lines': []})
 
-    # Single aggregated query: GROUP BY Allocation.line
+    # Active headcount per line (no Attendance join — counts all allocated employees)
+    headcount_query = db.session.query(
+        Allocation.line,
+        db.func.count(db.distinct(Allocation.employee_id)).label('headcount')
+    ).filter(
+        Allocation.end_date.is_(None),
+        Allocation.line.isnot(None),
+        Allocation.line != ''
+    )
+    if emp_ids is not None:
+        headcount_query = headcount_query.filter(Allocation.employee_id.in_(emp_ids))
+    if lines_filter:
+        headcount_query = headcount_query.filter(Allocation.line.in_(lines_filter))
+    headcount_map = {row[0]: (row[1] or 0) for row in headcount_query.group_by(Allocation.line).all()}
+
+    # Aggregate absence days (distinct employee + date with minutes_lost > 0) per line
     agg_query = db.session.query(
         Allocation.line,
-        db.func.count(db.distinct(Allocation.employee_id)).label('headcount'),
-        db.func.count(Attendance.id).label('total_records'),
         db.func.coalesce(db.func.sum(Attendance.minutes_lost), 0).label('lost_minutes'),
-        db.func.sum(
-            db.case((Attendance.minutes_lost > 0, 1), else_=0)
-        ).label('absent_records')
+        db.func.count(db.distinct(
+            db.case((Attendance.minutes_lost > 0,
+                     db.func.concat(Attendance.employee_id, '|', Attendance.record_date)))
+        )).label('absent_days')
     ).join(
         Attendance, Attendance.allocation_id == Allocation.id
     ).filter(
@@ -271,18 +285,16 @@ def api_by_line():
     agg_query = agg_query.group_by(Allocation.line).all()
 
     result = []
-    for line, headcount, total_records, lost_minutes, absent_records in agg_query:
+    for line, lost_minutes, absent_days in agg_query:
         lost_minutes = lost_minutes or 0
-        headcount = headcount or 0
-        total_records = total_records or 0
-        absent_records = absent_records or 0
-        rate = round(absent_records / total_records * 100, 2) if total_records > 0 else 0
+        absent_days = absent_days or 0
+        headcount = headcount_map.get(line, 0)
+        rate = round((absent_days / headcount) * 100, 2) if headcount > 0 else 0.0
 
         result.append({
             'line': line,
             'headcount': headcount,
-            'total_records': total_records,
-            'absent_records': absent_records,
+            'absent_days': absent_days,
             'lost_minutes': lost_minutes,
             'lost_hours': round(lost_minutes / 60, 2),
             'absenteeism_rate': rate
@@ -308,14 +320,31 @@ def api_by_project():
         if emp_ids is not None and not emp_ids:
             return jsonify({'projects': []})
 
+    # Active headcount per project (no Attendance join)
+    headcount_query = db.session.query(
+        Allocation.project,
+        db.func.count(db.distinct(Allocation.employee_id)).label('headcount')
+    ).filter(
+        Allocation.end_date.is_(None),
+        Allocation.project.isnot(None),
+        Allocation.project != ''
+    )
+    if emp_ids is not None:
+        headcount_query = headcount_query.filter(Allocation.employee_id.in_(emp_ids))
+    if projects_filter:
+        headcount_query = headcount_query.filter(Allocation.project.in_(projects_filter))
+    if lines_filter:
+        headcount_query = headcount_query.filter(Allocation.line.in_(lines_filter))
+    headcount_map = {row[0]: (row[1] or 0) for row in headcount_query.group_by(Allocation.project).all()}
+
+    # Aggregate absence days (distinct employee + date with minutes_lost > 0) per project
     agg_query = db.session.query(
         Allocation.project,
-        db.func.count(db.distinct(Allocation.employee_id)).label('headcount'),
-        db.func.count(Attendance.id).label('total_records'),
         db.func.coalesce(db.func.sum(Attendance.minutes_lost), 0).label('lost_minutes'),
-        db.func.sum(
-            db.case((Attendance.minutes_lost > 0, 1), else_=0)
-        ).label('absent_records')
+        db.func.count(db.distinct(
+            db.case((Attendance.minutes_lost > 0,
+                     db.func.concat(Attendance.employee_id, '|', Attendance.record_date)))
+        )).label('absent_days')
     ).join(
         Attendance, Attendance.allocation_id == Allocation.id
     ).filter(
@@ -336,18 +365,16 @@ def api_by_project():
     agg_query = agg_query.group_by(Allocation.project).all()
 
     result = []
-    for project, headcount, total_records, lost_minutes, absent_records in agg_query:
+    for project, lost_minutes, absent_days in agg_query:
         lost_minutes = lost_minutes or 0
-        headcount = headcount or 0
-        total_records = total_records or 0
-        absent_records = absent_records or 0
-        rate = round(absent_records / total_records * 100, 2) if total_records > 0 else 0
+        absent_days = absent_days or 0
+        headcount = headcount_map.get(project, 0)
+        rate = round((absent_days / headcount) * 100, 2) if headcount > 0 else 0.0
 
         result.append({
             'project': project,
             'headcount': headcount,
-            'total_records': total_records,
-            'absent_records': absent_records,
+            'absent_days': absent_days,
             'lost_minutes': lost_minutes,
             'lost_hours': round(lost_minutes / 60, 2),
             'absenteeism_rate': rate
@@ -373,14 +400,31 @@ def api_by_shift():
         if emp_ids is not None and not emp_ids:
             return jsonify({'shifts': []})
 
+    # Active headcount per shift (no Attendance join)
+    headcount_query = db.session.query(
+        Allocation.shift,
+        db.func.count(db.distinct(Allocation.employee_id)).label('headcount')
+    ).filter(
+        Allocation.end_date.is_(None)
+    )
+    if emp_ids is not None:
+        headcount_query = headcount_query.filter(Allocation.employee_id.in_(emp_ids))
+    if shifts_filter:
+        headcount_query = headcount_query.filter(Allocation.shift.in_([int(s) for s in shifts_filter]))
+    if projects:
+        headcount_query = headcount_query.filter(Allocation.project.in_(projects))
+    if lines:
+        headcount_query = headcount_query.filter(Allocation.line.in_(lines))
+    headcount_map = {row[0]: (row[1] or 0) for row in headcount_query.group_by(Allocation.shift).all()}
+
+    # Aggregate absence days (distinct employee + date with minutes_lost > 0) per shift
     agg_query = db.session.query(
         Allocation.shift,
-        db.func.count(db.distinct(Allocation.employee_id)).label('headcount'),
-        db.func.count(Attendance.id).label('total_records'),
         db.func.coalesce(db.func.sum(Attendance.minutes_lost), 0).label('lost_minutes'),
-        db.func.sum(
-            db.case((Attendance.minutes_lost > 0, 1), else_=0)
-        ).label('absent_records')
+        db.func.count(db.distinct(
+            db.case((Attendance.minutes_lost > 0,
+                     db.func.concat(Attendance.employee_id, '|', Attendance.record_date)))
+        )).label('absent_days')
     ).join(
         Attendance, Attendance.allocation_id == Allocation.id
     ).filter(
@@ -401,18 +445,16 @@ def api_by_shift():
     agg_query = agg_query.group_by(Allocation.shift).all()
 
     result = []
-    for shift_val, headcount, total_records, lost_minutes, absent_records in agg_query:
+    for shift_val, lost_minutes, absent_days in agg_query:
         lost_minutes = lost_minutes or 0
-        headcount = headcount or 0
-        total_records = total_records or 0
-        absent_records = absent_records or 0
-        rate = round(absent_records / total_records * 100, 2) if total_records > 0 else 0
+        absent_days = absent_days or 0
+        headcount = headcount_map.get(shift_val, 0)
+        rate = round((absent_days / headcount) * 100, 2) if headcount > 0 else 0.0
 
         result.append({
             'shift': shift_val,
             'headcount': headcount,
-            'total_records': total_records,
-            'absent_records': absent_records,
+            'absent_days': absent_days,
             'lost_minutes': lost_minutes,
             'lost_hours': round(lost_minutes / 60, 2),
             'absenteeism_rate': rate

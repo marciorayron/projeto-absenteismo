@@ -253,6 +253,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     legend: {
                         display: true,
                         position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                if (context.dataset.yAxisID === 'y') {
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + '%';
+                                }
+                                return context.dataset.label + ': ' + context.parsed.y + 'h';
+                            }
+                        }
                     }
                 },
                 scales: {
@@ -295,7 +305,14 @@ document.addEventListener('DOMContentLoaded', function() {
             options: {
                 responsive: true,
                 plugins: {
-                    legend: { display: false }
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + '%';
+                            }
+                        }
+                    }
                 },
                 scales: {
                     y: {
@@ -343,7 +360,17 @@ document.addEventListener('DOMContentLoaded', function() {
             options: {
                 responsive: true,
                 plugins: {
-                    legend: { display: true }
+                    legend: { display: true },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                if (context.dataset.yAxisID === 'y') {
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + '%';
+                                }
+                                return context.dataset.label + ': ' + context.parsed.y + 'h';
+                            }
+                        }
+                    }
                 },
                 scales: {
                     y: {

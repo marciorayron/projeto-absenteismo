@@ -121,12 +121,16 @@
                 {% for item in employee_list %}
                 {% set shift_info = shift_schedules.get(item.allocation.shift, {}) %}
                 {% set is_closed = item.allocation.shift in closed_shift_ids %}
+                {% set locked = item.on_vacation and not item.attendance %}
                 <tr data-employee-id="{{ item.employee.id }}"
                     data-employee-name="{{ item.employee.name }}"
                     data-shift="{{ item.allocation.shift }}"
                     data-shift-start="{{ shift_info.start_time or '' }}"
                     data-shift-end="{{ shift_info.end_time or '' }}"
-                    data-attendance-checkin="{{ item.attendance.check_in_time.strftime('%H:%M') if item.attendance and item.attendance.check_in_time else '' }}">
+                    data-attendance-checkin="{{ item.attendance.check_in_time.strftime('%H:%M') if item.attendance and item.attendance.check_in_time else '' }}"
+                    data-on-vacation="{{ 'true' if item.on_vacation else 'false' }}"
+                    data-vacation-start="{{ item.employee.vacation_start.isoformat() if item.employee.vacation_start else '' }}"
+                    data-vacation-end="{{ item.employee.vacation_end.isoformat() if item.employee.vacation_end else '' }}">
                     <td>{{ item.employee.id }}</td>
                     <td>{{ item.employee.name }}</td>
                     <td><span class="badge bg-secondary">Turno {{ item.allocation.shift }}</span></td>
@@ -148,7 +152,11 @@
                             {% endif %}
                             <br><small class="text-muted">{{ item.attendance.minutes_lost }} min perdidos</small>
                         {% else %}
+                            {% if item.on_vacation %}
+                            <span class="badge bg-warning text-dark">Férias</span>
+                            {% else %}
                             <span class="badge bg-success">Presente</span>
+                            {% endif %}
                         {% endif %}
                     </td>
                     <td class="action-cell">
@@ -156,16 +164,16 @@
                         <span class="badge bg-secondary" title="Turno encerrado. Alterações requerem perfil ADMIN." style="font-size: 0.8rem;">🔒 Turno Encerrado</span>
                         {% else %}
                         <div class="btn-group btn-group-sm" role="group">
-                            <button class="btn btn-danger quick-action-btn" data-event-type="FULL_ABSENCE" title="Falta">
+                            <button class="btn btn-danger quick-action-btn" data-event-type="FULL_ABSENCE" title="Falta" {% if locked %}disabled{% endif %}>
                                 ❌
                             </button>
                             <button class="btn btn-warning quick-action-btn" data-event-type="VACATION" title="Férias">
                                 🏖️
                             </button>
-                            <button class="btn btn-outline-warning quick-action-btn" data-event-type="LATE_ARRIVAL" data-needs-time="check_in" title="Atraso (informar horário)">
+                            <button class="btn btn-outline-warning quick-action-btn" data-event-type="LATE_ARRIVAL" data-needs-time="check_in" title="Atraso (informar horário)" {% if locked %}disabled{% endif %}>
                                 ⏰
                             </button>
-                            <button class="btn btn-outline-info quick-action-btn" data-event-type="EARLY_EXIT" data-needs-time="both" title="Saída Antecipada (informar horários)">
+                            <button class="btn btn-outline-info quick-action-btn" data-event-type="EARLY_EXIT" data-needs-time="both" title="Saída Antecipada (informar horários)" {% if locked %}disabled{% endif %}>
                                 🚪
                             </button>
                             <button class="btn btn-success quick-action-btn" data-event-type="PRESENT" title="Presente / Reset">
@@ -237,6 +245,73 @@
 </div>
 {% endif %}
 
+<!-- Modal: Férias (date range) -->
+<div class="modal fade" id="modalFerias" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h6 class="modal-title"><i class="bi bi-sun"></i> Registrar Férias</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="feriasEmployeeId">
+                <div class="mb-3">
+                    <label class="form-label">Funcionário</label>
+                    <input type="text" class="form-control" id="feriasEmployeeName" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Início das Férias <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="feriasStart" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Fim das Férias <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="feriasEnd" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger btn-sm" id="clearFerias">Limpar Férias</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-warning btn-sm" id="confirmFerias">Salvar Férias</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Falta (justification + observation) -->
+<div class="modal fade" id="modalFalta" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h6 class="modal-title"><i class="bi bi-x-circle"></i> Registrar Falta</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="faltaEmployeeId">
+                <div class="mb-3">
+                    <label class="form-label">Funcionário</label>
+                    <input type="text" class="form-control" id="faltaEmployeeName" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Tipo de Justificativa <span class="text-danger">*</span></label>
+                    <select class="form-select" id="faltaJustification" required>
+                        <option value="">Selecione...</option>
+                        <option value="JUSTIFIED">Justificada</option>
+                        <option value="UNJUSTIFIED">Injustificada</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Observação / Motivo</label>
+                    <textarea class="form-control" id="faltaNotes" rows="3" placeholder="Observação..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger btn-sm" id="confirmFalta">Confirmar Falta</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Mini-Modal: Atraso (check-in time) -->
 <div class="modal fade" id="delayModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
@@ -254,6 +329,10 @@
                 <div class="mb-3">
                     <label class="form-label">Horário de Entrada <span class="text-danger">*</span></label>
                     <input type="time" class="form-control" id="delayCheckIn" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Motivo do Atraso</label>
+                    <textarea class="form-control" id="delayNotes" rows="2" placeholder="Motivo do atraso..."></textarea>
                 </div>
                 <small class="text-muted">
                     <i class="bi bi-info-circle"></i> Atraso até 5 min não perde tempo. Acima disso, minutos excedentes são contabilizados.
@@ -288,6 +367,10 @@
                 <div class="mb-3">
                     <label class="form-label">Horário de Saída <span class="text-danger">*</span></label>
                     <input type="time" class="form-control" id="exitCheckOut" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Motivo da Saída</label>
+                    <textarea class="form-control" id="exitNotes" rows="2" placeholder="Motivo da saída..."></textarea>
                 </div>
                 <small class="text-muted">
                     <i class="bi bi-info-circle"></i> Saída com até 60 min após início do turno vira Falta Integral.
@@ -370,11 +453,25 @@ document.addEventListener('DOMContentLoaded', function() {
                     quickAction(employeeId, 'PRESENT', '', '', row);
                 }
             } else if (eventType === 'FULL_ABSENCE') {
-                if (!confirm(`Confirmar FALTA para "${employeeName}"?`)) return;
-                quickAction(employeeId, 'FULL_ABSENCE', '', '', row);
+                // Open absence justification modal
+                document.getElementById('faltaEmployeeId').value = employeeId;
+                document.getElementById('faltaEmployeeName').value = employeeName;
+                document.getElementById('faltaJustification').value = '';
+                document.getElementById('faltaNotes').value = '';
+                const faltaModal = new bootstrap.Modal(document.getElementById('modalFalta'));
+                faltaModal.show();
+                document.getElementById('modalFalta')._row = row;
             } else if (eventType === 'VACATION') {
-                if (!confirm(`Confirmar FÉRIAS para "${employeeName}"?`)) return;
-                quickAction(employeeId, 'VACATION', '', '', row);
+                // Open vacation range modal (pre-fill current dates if any)
+                const existingStart = row.dataset.vacationStart || '';
+                const existingEnd = row.dataset.vacationEnd || '';
+                document.getElementById('feriasEmployeeId').value = employeeId;
+                document.getElementById('feriasEmployeeName').value = employeeName;
+                document.getElementById('feriasStart').value = existingStart || selectedDate;
+                document.getElementById('feriasEnd').value = existingEnd || '';
+                const feriasModal = new bootstrap.Modal(document.getElementById('modalFerias'));
+                feriasModal.show();
+                document.getElementById('modalFerias')._row = row;
             } else if (needsTime === 'check_in') {
                 // Open delay modal
                 document.getElementById('delayEmployeeId').value = employeeId;
@@ -405,8 +502,9 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Informe o horário de entrada.');
             return;
         }
+        const notes = document.getElementById('delayNotes').value.trim();
         const row = document.getElementById('delayModal')._row;
-        quickAction(employeeId, 'LATE_ARRIVAL', checkIn, '', row);
+        quickAction(employeeId, 'LATE_ARRIVAL', checkIn, '', row, null, notes);
         bootstrap.Modal.getInstance(document.getElementById('delayModal')).hide();
     });
 
@@ -419,12 +517,79 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Informe os horários de entrada e saída.');
             return;
         }
+        const notes = document.getElementById('exitNotes').value.trim();
         const row = document.getElementById('exitModal')._row;
-        quickAction(employeeId, 'EARLY_EXIT', checkIn, checkOut, row);
+        quickAction(employeeId, 'EARLY_EXIT', checkIn, checkOut, row, null, notes);
         bootstrap.Modal.getInstance(document.getElementById('exitModal')).hide();
     });
 
-    async function quickAction(employeeId, eventType, checkIn, checkOut, row) {
+    // Confirm Falta button
+    document.getElementById('confirmFalta').addEventListener('click', function() {
+        const employeeId = document.getElementById('faltaEmployeeId').value;
+        const justificationType = document.getElementById('faltaJustification').value;
+        const notes = document.getElementById('faltaNotes').value.trim();
+        if (!justificationType) {
+            alert('Selecione o tipo de justificativa.');
+            return;
+        }
+        const row = document.getElementById('modalFalta')._row;
+        quickAction(employeeId, 'FULL_ABSENCE', '', '', row, justificationType, notes);
+        bootstrap.Modal.getInstance(document.getElementById('modalFalta')).hide();
+    });
+
+    // Confirm Férias (Salvar) button
+    document.getElementById('confirmFerias').addEventListener('click', async function() {
+        const employeeId = document.getElementById('feriasEmployeeId').value;
+        const start = document.getElementById('feriasStart').value;
+        const end = document.getElementById('feriasEnd').value;
+        if (!start || !end) {
+            alert('Informe as datas de início e fim das férias.');
+            return;
+        }
+        try {
+            const res = await fetch('/leader/api/set-vacation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ employee_id: employeeId, vacation_start: start, vacation_end: end })
+            });
+            const data = await res.json();
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('modalFerias')).hide();
+                showToast(data.message || 'Férias salvas!', 'success');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                alert('Erro: ' + (data.error || 'Erro desconhecido.'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Erro de conexão ao salvar férias.');
+        }
+    });
+
+    // Clear Férias button
+    document.getElementById('clearFerias').addEventListener('click', async function() {
+        const employeeId = document.getElementById('feriasEmployeeId').value;
+        try {
+            const res = await fetch('/leader/api/set-vacation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ employee_id: employeeId, vacation_start: '', vacation_end: '' })
+            });
+            const data = await res.json();
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('modalFerias')).hide();
+                showToast(data.message || 'Férias removidas.', 'success');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                alert('Erro: ' + (data.error || 'Erro desconhecido.'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Erro de conexão ao limpar férias.');
+        }
+    });
+
+    async function quickAction(employeeId, eventType, checkIn, checkOut, row, justificationType, notes) {
         try {
             const res = await fetch('/leader/api/quick-action', {
                 method: 'POST',
@@ -434,7 +599,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     record_date: selectedDate,
                     event_type: eventType,
                     check_in: checkIn,
-                    check_out: checkOut
+                    check_out: checkOut,
+                    justification_type: justificationType || null,
+                    notes: notes || null
                 })
             });
             const data = await res.json();

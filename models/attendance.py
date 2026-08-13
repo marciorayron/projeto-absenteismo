@@ -17,6 +17,8 @@ class Attendance(db.Model):
     check_out_time = db.Column(db.Time, nullable=True)
     minutes_lost = db.Column(db.Integer, default=0)
     registered_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    justification_type = db.Column(db.String(20), nullable=True)  # 'JUSTIFIED' | 'UNJUSTIFIED'
+    notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
     registered_by = db.relationship('User', backref='registered_attendances')
@@ -32,6 +34,8 @@ class Attendance(db.Model):
             'check_out_time': self.check_out_time.isoformat() if self.check_out_time else None,
             'minutes_lost': self.minutes_lost,
             'registered_by_id': self.registered_by_id,
+            'justification_type': self.justification_type,
+            'notes': self.notes,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

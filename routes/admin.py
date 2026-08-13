@@ -427,3 +427,76 @@ def shifts_toggle(shift_id):
     status = 'ativado' if shift.is_active else 'desativado'
     flash(f'Turno "{shift.name}" {status}.', 'success')
     return redirect(url_for('admin.shifts'))
+
+
+# ─────────────────── EMPLOYEE VACATION MANAGEMENT ───────────────────
+
+@admin_bp.route('/employees', methods=['GET'])
+@admin_required
+def employees():
+    """Employee management view with vacation period editing."""
+    search = request.args.get('search', '').strip()
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+
+    query = Employee.query
+    if search:
+        pattern = f'%{search}%'
+        query = query.filter(
+            db.or_(Employee.id.ilike(pattern), Employee.name.ilike(pattern))
+        )
+
+    pagination = query.order_by(Employee.name).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
+    return render_template(
+        'admin/employees.html',
+        pagination=pagination,
+        search=search
+    )
+
+
+@admin_bp.route('/employees/<employee_id>/vacation', methods=['POST'])
+@admin_required
+def employee_vacation(employee_id):
+    """Set or clear an employee's vacation period."""
+    emp = Employee.query.get_or_404(employee_id)
+
+    vacation_start = request.form.get('vacation_start', '').strip()
+    vacation_end = request.form.get('vacation_end', '').strip()
+
+    def _parse_date(value):
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except ValueError:
+            return False
+
+    start = _parse_date(vacation_start)
+    end = _parse_date(vacation_end)
+
+    back = url_for('admin.employees', search=request.args.get('search', ''))
+
+    if start is False or end is False:
+        flash('Data inválida. Use o formato AAAA-MM-DD.', 'danger')
+        return redirect(back)
+
+    if (start and not end) or (end and not start):
+        flash('Informe ambas as datas (início e fim) ou deixe ambas vazias para limpar.', 'warning')
+        return redirect(back)
+
+    if start and end and start > end:
+        flash('A data de início não pode ser posterior à data de fim.', 'danger')
+        return redirect(back)
+
+    emp.vacation_start = start
+    emp.vacation_end = end
+    db.session.commit()
+
+    if start and end:
+        flash(f'Férias de {emp.name} definidas de {start} a {end}.', 'success')
+    else:
+        flash(f'Período de férias de {emp.name} removido.', 'success')
+    return redirect(back)

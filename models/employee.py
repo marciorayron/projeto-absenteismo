@@ -6,6 +6,8 @@ class Employee(db.Model):
     id = db.Column(db.String(50), primary_key=True)  # Preserves original ID like "2020880"
     name = db.Column(db.String(150), nullable=False)
     status = db.Column(db.String(20), default='ACTIVE')
+    vacation_start = db.Column(db.Date, nullable=True)
+    vacation_end = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
     allocations = db.relationship('Allocation', backref='employee', lazy=True,
@@ -17,6 +19,8 @@ class Employee(db.Model):
             'id': self.id,
             'name': self.name,
             'status': self.status,
+            'vacation_start': self.vacation_start.isoformat() if self.vacation_start else None,
+            'vacation_end': self.vacation_end.isoformat() if self.vacation_end else None,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
