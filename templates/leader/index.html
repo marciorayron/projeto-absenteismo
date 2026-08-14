@@ -6,36 +6,22 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1><i class="bi bi-person-check"></i> Registro de Presença</h1>
     <div class="btn-group">
+        {% if current_user.role == 'LIDER' %}
+            {% if operation_audited %}
+            <span class="btn btn-success disabled">
+                <i class="bi bi-check-circle"></i> ✅ Operação Auditada Hoje
+            </span>
+            {% else %}
+            <button class="btn btn-warning" id="auditOperationBtn">
+                <i class="bi bi-lock-fill"></i> 🔒 Concluir e Auditar Minha Operação ({{ managed_scope_count }} atribuição{% if managed_scope_count != 1 %}ões{% endif %})
+            </button>
+            {% endif %}
+        {% endif %}
         <a href="{{ url_for('dashboard.index') }}" class="btn btn-outline-primary">
             <i class="bi bi-bar-chart"></i> Dashboard
         </a>
     </div>
 </div>
-
-<!-- Line Validation Status Banner -->
-{% if line_validation_status %}
-<div class="mb-4">
-    {% if line_validation_status.validated %}
-    <div class="alert alert-success d-flex align-items-center" role="alert">
-        <i class="bi bi-check-circle-fill me-2 fs-5"></i>
-        <div>
-            <strong>Linha Auditada</strong> —
-            Validada em {{ line_validation_status.validated_at }} por {{ line_validation_status.validated_by }}.
-        </div>
-    </div>
-    {% else %}
-    <div class="alert alert-warning d-flex align-items-center" role="alert">
-        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
-        <div>
-            <strong>⚠️ Status da Linha no Dia: Pendente de Validação</strong>
-            {% if not line_validation_status.has_employees %}
-            <br><small>Nenhum funcionário alocado nesta linha/turno para hoje.</small>
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-</div>
-{% endif %}
 
 <!-- Filters -->
 <div class="card mb-4">
@@ -122,6 +108,7 @@
                 {% set shift_info = shift_schedules.get(item.allocation.shift, {}) %}
                 {% set is_closed = item.allocation.shift in closed_shift_ids %}
                 {% set locked = item.on_vacation and not item.attendance %}
+                {% set off_day = item.is_off_day and not item.attendance %}
                 <tr data-employee-id="{{ item.employee.id }}"
                     data-employee-name="{{ item.employee.name }}"
                     data-shift="{{ item.allocation.shift }}"
@@ -129,6 +116,7 @@
                     data-shift-end="{{ shift_info.end_time or '' }}"
                     data-attendance-checkin="{{ item.attendance.check_in_time.strftime('%H:%M') if item.attendance and item.attendance.check_in_time else '' }}"
                     data-on-vacation="{{ 'true' if item.on_vacation else 'false' }}"
+                    data-is-off-day="{{ 'true' if item.is_off_day else 'false' }}"
                     data-vacation-start="{{ item.employee.vacation_start.isoformat() if item.employee.vacation_start else '' }}"
                     data-vacation-end="{{ item.employee.vacation_end.isoformat() if item.employee.vacation_end else '' }}">
                     <td>{{ item.employee.id }}</td>
@@ -154,6 +142,8 @@
                         {% else %}
                             {% if item.on_vacation %}
                             <span class="badge bg-warning text-dark">Férias</span>
+                            {% elif item.is_off_day %}
+                            <span class="badge bg-secondary">Folga</span>
                             {% else %}
                             <span class="badge bg-success">Presente</span>
                             {% endif %}
@@ -164,16 +154,16 @@
                         <span class="badge bg-secondary" title="Turno encerrado. Alterações requerem perfil ADMIN." style="font-size: 0.8rem;">🔒 Turno Encerrado</span>
                         {% else %}
                         <div class="btn-group btn-group-sm" role="group">
-                            <button class="btn btn-danger quick-action-btn" data-event-type="FULL_ABSENCE" title="Falta" {% if locked %}disabled{% endif %}>
+                            <button class="btn btn-danger quick-action-btn" data-event-type="FULL_ABSENCE" title="Falta" {% if locked or off_day %}disabled{% endif %}>
                                 ❌
                             </button>
                             <button class="btn btn-warning quick-action-btn" data-event-type="VACATION" title="Férias">
                                 🏖️
                             </button>
-                            <button class="btn btn-outline-warning quick-action-btn" data-event-type="LATE_ARRIVAL" data-needs-time="check_in" title="Atraso (informar horário)" {% if locked %}disabled{% endif %}>
+                            <button class="btn btn-outline-warning quick-action-btn" data-event-type="LATE_ARRIVAL" data-needs-time="check_in" title="Atraso (informar horário)" {% if locked or off_day %}disabled{% endif %}>
                                 ⏰
                             </button>
-                            <button class="btn btn-outline-info quick-action-btn" data-event-type="EARLY_EXIT" data-needs-time="both" title="Saída Antecipada (informar horários)" {% if locked %}disabled{% endif %}>
+                            <button class="btn btn-outline-info quick-action-btn" data-event-type="EARLY_EXIT" data-needs-time="both" title="Saída Antecipada (informar horários)" {% if locked or off_day %}disabled{% endif %}>
                                 🚪
                             </button>
                             <button class="btn btn-success quick-action-btn" data-event-type="PRESENT" title="Presente / Reset">
@@ -233,17 +223,7 @@
     {% endif %}
 </div>
 
-<!-- Validate Line Footer -->
-{% if can_validate and line_validation_status and not line_validation_status.validated %}
-<div class="card mt-4 border-warning">
-    <div class="card-body text-center">
-        <p class="mb-2 text-muted">Todos os funcionários desta linha/turno foram apontados?</p>
-        <button class="btn btn-warning btn-lg" id="validateLineBtn">
-            <i class="bi bi-lock-fill"></i> 🔒 Concluir e Auditar Apontamento do Dia
-        </button>
-    </div>
-</div>
-{% endif %}
+<!-- Validate Line Footer removed: replaced by the grouped top "Auditar Minha Operação" button -->
 
 <!-- Modal: Férias (date range) -->
 <div class="modal fade" id="modalFerias" tabindex="-1">
@@ -764,22 +744,18 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // ========== Validate Line Button ==========
-    const validateBtn = document.getElementById('validateLineBtn');
-    if (validateBtn) {
-        validateBtn.addEventListener('click', async function() {
-            if (!confirm('Confirma a auditoria desta linha para o dia? Esta ação registrará que todos os apontamentos foram conferidos.')) {
+    // ========== Audit My Operation Button (grouped) ==========
+    const auditBtn = document.getElementById('auditOperationBtn');
+    if (auditBtn) {
+        auditBtn.addEventListener('click', async function() {
+            if (!confirm('Confirma a auditoria de TODAS as suas linhas para esta data? Esta ação registrará que todos os apontamentos foram conferidos.')) {
                 return;
             }
             try {
-                const res = await fetch('/leader/api/validate-line', {
+                const res = await fetch('/leader/api/audit-operation', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        record_date: selectedDate,
-                        line: selectedLine,
-                        shift: selectedShift
-                    })
+                    body: JSON.stringify({ record_date: selectedDate })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -790,7 +766,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } catch (err) {
                 console.error(err);
-                alert('Erro de conexão ao auditar linha.');
+                alert('Erro de conexão ao auditar operação.');
             }
         });
     }

@@ -477,4 +477,50 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Error loading Bradford data:', error);
         }
     }
+
+    // ─── PENDING AUDITS MODAL ───
+
+    const pendingAlertBox = document.getElementById('pendingAlertBox');
+    if (pendingAlertBox) {
+        pendingAlertBox.addEventListener('click', function() {
+            const modalEl = document.getElementById('modalPendingAudits');
+            const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+            modal.show();
+            loadPendingAudits();
+        });
+    }
+
+    async function loadPendingAudits() {
+        const body = document.getElementById('pendingAuditsBody');
+        if (!body) return;
+        try {
+            const params = getFilterValues();
+            const qs = buildQueryString(params);
+            const res = await fetch(`/dashboard/api/pending-audits?${qs}`);
+            const data = await res.json();
+            const items = data.pending || [];
+
+            if (items.length === 0) {
+                body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Nenhum registro pendente de auditoria.</td></tr>';
+                return;
+            }
+
+            body.innerHTML = '';
+            items.forEach(item => {
+                const dateFmt = item.date ? item.date.split('-').reverse().join('/') : '—';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${dateFmt}</td>
+                    <td>Turno ${item.shift}</td>
+                    <td>${item.line}</td>
+                    <td>${item.leader}</td>
+                    <td><span class="badge bg-warning text-dark">${item.status}</span></td>
+                `;
+                body.appendChild(tr);
+            });
+        } catch (error) {
+            console.error('Error loading pending audits:', error);
+            body.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Erro ao carregar pendências.</td></tr>';
+        }
+    }
 });

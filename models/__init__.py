@@ -5,5 +5,10 @@ from models.attendance import Attendance
 from models.audit_log import AuditLog
 from models.line_validation import LineValidation
 from models.shift import Shift
+from models.line import Line
+from models.leader_scope import LeaderScope
 
-__all__ = ['User', 'Employee', 'Allocation', 'Attendance', 'AuditLog', 'LineValidation', 'Shift']
+__all__ = [
+    'User', 'Employee', 'Allocation', 'Attendance', 'AuditLog',
+    'LineValidation', 'Shift', 'Line', 'LeaderScope'
+]

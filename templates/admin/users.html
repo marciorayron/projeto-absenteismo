@@ -17,17 +17,22 @@
                 <label class="form-label">Senha</label>
                 <input type="password" class="form-control" name="password" required>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label">Perfil</label>
-                <select class="form-select" name="role">
+                <select class="form-select" name="role" id="roleSelect">
                     <option value="LIDER">Líder</option>
                     <option value="ADMIN">Administrador</option>
                 </select>
             </div>
-            <div class="col-md-3 d-flex align-items-end">
+            <div class="col-md-4 d-flex align-items-end">
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="bi bi-person-plus"></i> Criar
                 </button>
+            </div>
+            <div class="col-12" id="managedScopeGroup">
+                <label class="form-label">Escopo Gerenciado <small class="text-muted">(Turno + Projeto + Linha — aplicável a Líder)</small></label>
+                <div id="scopePickerNew" class="scope-picker-edit" data-hidden="managedScopeNew" data-initial="[]"></div>
+                <input type="hidden" name="managed_scope" id="managedScopeNew" value="[]">
             </div>
         </form>
     </div>
@@ -44,6 +49,7 @@
                     <th>ID</th>
                     <th>Usuário</th>
                     <th>Perfil</th>
+                    <th>Escopo</th>
                     <th>Status</th>
                     <th>Ações</th>
                 </tr>
@@ -59,6 +65,19 @@
                         </span>
                     </td>
                     <td>
+                        {% if user.role == 'LIDER' %}
+                            {% if user.managed_scope_list %}
+                                {% for s in user.managed_scope_list %}
+                                    <span class="badge bg-light text-dark border mb-1">Turno {{ s.shift if s.shift is not none else '—' }}{% if s.project %} - {{ s.project }}{% endif %} - {{ s.line }}</span>
+                                {% endfor %}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
                         {% if user.is_active %}
                             <span class="badge bg-success">Ativo</span>
                         {% else %}
@@ -72,6 +91,11 @@
                                     <i class="bi bi-toggle-on"></i> {{ 'Ativar' if not user.is_active else 'Desativar' }}
                                 </button>
                             </form>
+                            {% if user.role == 'LIDER' %}
+                            <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#linesModal{{ user.id }}">
+                                <i class="bi bi-diagram-3"></i> Escopo
+                            </button>
+                            {% endif %}
                             {% if user.id != current_user.id %}
                             <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.id) }}" class="d-inline" onsubmit="return confirm('Excluir este usuário?');">
                                 <button type="submit" class="btn btn-danger">
@@ -87,4 +111,60 @@
         </table>
     </div>
 </div>
+
+{% for user in users %}
+{% if user.role == 'LIDER' %}
+<div class="modal fade" id="linesModal{{ user.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('admin.edit_user_lines', user_id=user.id) }}">
+                <div class="modal-header bg-primary text-white">
+                    <h6 class="modal-title"><i class="bi bi-diagram-3"></i> Escopo de {{ user.username }}</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="scopePicker{{ user.id }}" class="scope-picker-edit" data-hidden="managedScope{{ user.id }}" data-initial='{{ user.managed_scope_list | tojson }}'></div>
+                    <input type="hidden" name="managed_scope" id="managedScope{{ user.id }}" value="[]">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const SCOPES = {{ available_scopes | tojson }};
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Toggle the managed-scope group visibility based on the selected role
+        const roleSelect = document.getElementById('roleSelect');
+        const scopeGroup = document.getElementById('managedScopeGroup');
+        function toggleScope() {
+            if (roleSelect && scopeGroup) {
+                scopeGroup.style.display = roleSelect.value === 'LIDER' ? 'block' : 'none';
+            }
+        }
+        if (roleSelect) roleSelect.addEventListener('change', toggleScope);
+        toggleScope();
+
+        // Initialize the creation picker
+        initScopePicker({ rootId: 'scopePickerNew', hiddenId: 'managedScopeNew', initial: [] });
+
+        // Initialize each edit-modal picker
+        document.querySelectorAll('.scope-picker-edit').forEach(function(el) {
+            if (el.id === 'scopePickerNew') return;
+            let initial = [];
+            try { initial = JSON.parse(el.dataset.initial || '[]'); } catch (e) { initial = []; }
+            initScopePicker({ rootId: el.id, hiddenId: el.dataset.hidden, initial: initial });
+        });
+    });
+</script>
+<script src="{{ url_for('static', filename='js/scope-picker.js') }}"></script>
 {% endblock %}

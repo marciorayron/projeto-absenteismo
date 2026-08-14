@@ -78,6 +78,7 @@
                                         data-start="{{ s.start_time }}"
                                         data-end="{{ s.end_time }}"
                                         data-break="{{ s.break_minutes }}"
+                                        data-work-days="{{ s.work_days or '0,1,2,3,4' }}"
                                         data-bs-toggle="modal" data-bs-target="#shiftModal">
                                     <i class="bi bi-pencil"></i>
                                 </button>
@@ -146,6 +147,39 @@
                         <input type="number" class="form-control" name="break_minutes" id="shiftBreak"
                                min="0" max="240" value="60" required oninput="recalcPreview()">
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">Dias de Trabalho</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input work-day-check" type="checkbox" name="work_days" id="wd0" value="0">
+                                <label class="form-check-label" for="wd0">Seg</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input work-day-check" type="checkbox" name="work_days" id="wd1" value="1">
+                                <label class="form-check-label" for="wd1">Ter</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input work-day-check" type="checkbox" name="work_days" id="wd2" value="2">
+                                <label class="form-check-label" for="wd2">Qua</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input work-day-check" type="checkbox" name="work_days" id="wd3" value="3">
+                                <label class="form-check-label" for="wd3">Qui</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input work-day-check" type="checkbox" name="work_days" id="wd4" value="4">
+                                <label class="form-check-label" for="wd4">Sex</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input work-day-check" type="checkbox" name="work_days" id="wd5" value="5">
+                                <label class="form-check-label" for="wd5">Sáb</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input work-day-check" type="checkbox" name="work_days" id="wd6" value="6">
+                                <label class="form-check-label" for="wd6">Dom</label>
+                            </div>
+                        </div>
+                    </div>
                     <div class="alert alert-info mb-0" id="previewBox" style="display:none;">
                         <strong>Prévia:</strong>
                         <span id="previewHours">--</span>
@@ -174,6 +208,7 @@
             const start = this.dataset.start;
             const end = this.dataset.end;
             const brk = this.dataset.break;
+            const workDays = this.dataset.workDays || '0,1,2,3,4';
 
             document.getElementById('shiftModalTitle').innerHTML =
                 '<i class="bi bi-pencil"></i> Editar Turno #' + id;
@@ -184,6 +219,7 @@
             document.getElementById('shiftStart').value = start;
             document.getElementById('shiftEnd').value = end;
             document.getElementById('shiftBreak').value = brk;
+            setWorkDays(workDays);
             document.getElementById('shiftSubmitBtn').innerHTML =
                 '<i class="bi bi-check-lg"></i> Atualizar Turno';
             recalcPreview();
@@ -202,10 +238,21 @@
         document.getElementById('shiftStart').value = '';
         document.getElementById('shiftEnd').value = '';
         document.getElementById('shiftBreak').value = '60';
+        setWorkDays('0,1,2,3,4');
         document.getElementById('shiftSubmitBtn').innerHTML =
             '<i class="bi bi-check-lg"></i> Salvar Turno';
         document.getElementById('previewBox').style.display = 'none';
     });
+
+    // Check/uncheck working-day checkboxes from a comma-separated string
+    function setWorkDays(commaStr) {
+        const selected = new Set(
+            (commaStr || '').split(',').map(s => s.trim()).filter(s => s !== '')
+        );
+        document.querySelectorAll('.work-day-check').forEach(cb => {
+            cb.checked = selected.has(cb.value);
+        });
+    }
 
     // Live preview of net working hours
     function recalcPreview() {

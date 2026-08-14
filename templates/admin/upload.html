@@ -10,6 +10,29 @@
     </a>
 </div>
 
+{% if summary %}
+<div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+    <h5 class="alert-heading"><i class="bi bi-check-circle-fill"></i> Upload Processado com Sucesso</h5>
+    <p class="mb-1">
+        Linhas processadas: <strong>{{ summary.processed_rows }}</strong> &bull;
+        Funcionários criados: <strong>{{ summary.employees_inserted }}</strong> &bull;
+        Atualizados: <strong>{{ summary.employees_updated }}</strong> &bull;
+        Alocações: <strong>{{ summary.allocations_created }}</strong>
+    </p>
+    {% if summary.created_lines %}
+    <p class="mb-1">Novas linhas criadas:
+        {% for l in summary.created_lines %}<span class="badge bg-info text-dark">{{ l }}</span> {% endfor %}
+    </p>
+    {% endif %}
+    {% if summary.auto_corrected_lines %}
+    <p class="mb-0">Linhas auto-corrigidas:
+        {% for c in summary.auto_corrected_lines %}<span class="badge bg-warning text-dark">{{ c.from }} &rarr; {{ c.to }}</span> {% endfor %}
+    </p>
+    {% endif %}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
 <div class="row">
     <div class="col-md-8 mx-auto">
         <div class="card shadow">

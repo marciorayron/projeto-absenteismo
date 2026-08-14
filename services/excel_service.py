@@ -1,4 +1,5 @@
 import io
+import difflib
 import pandas as pd
 import logging
 from datetime import date, datetime
@@ -8,8 +9,68 @@ from models.allocation import Allocation
 from models.attendance import Attendance
 from models.user import User
 from models.audit_log import AuditLog
+from models.line import Line
 
 logger = logging.getLogger(__name__)
+
+# Fuzzy-match threshold for auto-correcting line-name typos.
+# Set slightly below 0.88 to also catch single-character typos in short names
+# (e.g. "Consoli" vs "Console" ≈ 0.857).
+FUZZY_MATCH_THRESHOLD = 0.85
+
+
+def _strip_text(value):
+    """Return a stripped string, treating NaN/None as an empty string."""
+    if value is None:
+        return ''
+    try:
+        if pd.isna(value):
+            return ''
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def _resolve_line(lines, line_name, project):
+    """Resolve (line_name, project) to a canonical Line, auto-creating or fuzzy-correcting.
+
+    Args:
+        lines (list): in-memory list of existing Line objects (updated on creation).
+        line_name (str): raw line name from the spreadsheet.
+        project (str): raw project name from the spreadsheet.
+
+    Returns:
+        tuple: (Line, action) where action is 'exact', 'fuzzy', or 'created'.
+    """
+    line_name = _strip_text(line_name)
+    project = _strip_text(project)
+    name_key = line_name.casefold()
+    proj_key = project.casefold()
+
+    # 1. Exact match (case-insensitive)
+    for l in lines:
+        if l.name.casefold() == name_key and l.project.casefold() == proj_key:
+            return l, 'exact'
+
+    # 2. Fuzzy match within the same project
+    best = None
+    best_ratio = 0.0
+    for l in lines:
+        if l.project.casefold() != proj_key:
+            continue
+        ratio = difflib.SequenceMatcher(None, name_key, l.name.casefold()).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best = l
+    if best and best_ratio >= FUZZY_MATCH_THRESHOLD:
+        return best, 'fuzzy'
+
+    # 3. Auto-provision a new line
+    new_line = Line(name=line_name, project=project)
+    db.session.add(new_line)
+    db.session.flush()
+    lines.append(new_line)
+    return new_line, 'created'
 
 
 def _clean_dataframe(df):
@@ -38,13 +99,14 @@ def _clean_dataframe(df):
         logger.warning(f"Dropped {invalid_count} rows with invalid ID after sanitization.")
         df.drop(df[mask_invalid].index, inplace=True)
 
-    # Step 4: Strip all text columns
+    # Step 4: Strip all text columns (NaN/None -> '')
     for col in ['Nome', 'Projeto', 'Linha']:
         if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].apply(_strip_text)
 
     # Also strip Nome after ensuring it exists
-    df['Nome'] = df['Nome'].astype(str).str.strip()
+    if 'Nome' in df.columns:
+        df['Nome'] = df['Nome'].apply(_strip_text)
 
     # Remove rows where Nome became empty/invalid after stripping
     invalid_names = {'', 'nan', 'none', 'nat', 'null', 'na'}
@@ -97,18 +159,32 @@ def process_excel_upload(file_path, user_id=None):
     inserted_count = 0
     updated_count = 0
     allocation_created = 0
+    created_lines = []
+    auto_corrected_lines = []
+
+    # Load existing lines once; new lines are appended as they are auto-provisioned.
+    lines = Line.query.all()
 
     for _, row in df.iterrows():
-        emp_id = row['ID']
-        name = row['Nome']
+        emp_id = _strip_text(row['ID'])
+        name = _strip_text(row['Nome'])
         shift = int(row['Turno'])
-        project = row['Projeto']
-        line = row['Linha']
+        project = _strip_text(row['Projeto'])
+        line = _strip_text(row['Linha'])
 
         # Redundant safety check — _clean_dataframe should have removed these already
         if not emp_id or not name or emp_id.lower() in ('nan', 'none', 'nat', 'null', 'na', ''):
             logger.warning(f"Skipping row with invalid ID='{emp_id}', Nome='{name}'.")
             continue
+
+        # Resolve the line (exact / fuzzy / auto-create) before allocation
+        line_obj, action = _resolve_line(lines, line, project)
+        canonical_line = line_obj.name
+        canonical_project = line_obj.project
+        if action == 'created':
+            created_lines.append(canonical_line)
+        elif action == 'fuzzy':
+            auto_corrected_lines.append({'from': line, 'to': canonical_line})
 
         # Upsert employee
         employee = Employee.query.get(emp_id)
@@ -131,23 +207,23 @@ def process_excel_upload(file_path, user_id=None):
             db.session.flush()  # Flush to ensure employee is persisted
             inserted_count += 1
 
-        # Manage allocation history using legacy query
+        # Manage allocation history using the canonical (sanitized) line/project
         current_alloc = Allocation.query.filter_by(employee_id=emp_id, end_date=None).first()
-        
+
         if current_alloc:
             # Check if shift/project/line changed
             if (current_alloc.shift != shift or
-                current_alloc.project != project or
-                current_alloc.line != line):
+                current_alloc.project != canonical_project or
+                current_alloc.line != canonical_line):
                 # Close current allocation
                 current_alloc.end_date = today
-                
+
                 # Create new allocation
                 new_alloc = Allocation(
                     employee_id=emp_id,
                     shift=shift,
-                    project=project,
-                    line=line,
+                    project=canonical_project,
+                    line=canonical_line,
                     start_date=today,
                     end_date=None
                 )
@@ -158,8 +234,8 @@ def process_excel_upload(file_path, user_id=None):
             new_alloc = Allocation(
                 employee_id=emp_id,
                 shift=shift,
-                project=project,
-                line=line,
+                project=canonical_project,
+                line=canonical_line,
                 start_date=today,
                 end_date=None
             )
@@ -172,14 +248,18 @@ def process_excel_upload(file_path, user_id=None):
     db.session.commit()
     logger.info(
         f"Upload complete: {inserted_count} inserted, {updated_count} updated, "
-        f"{allocation_created} allocations created."
+        f"{allocation_created} allocations created, {len(created_lines)} lines created, "
+        f"{len(auto_corrected_lines)} lines auto-corrected."
     )
 
     return {
+        'status': 'success',
+        'processed_rows': len(df),
         'employees_inserted': inserted_count,
         'employees_updated': updated_count,
         'allocations_created': allocation_created,
-        'total_rows': len(df)
+        'created_lines': created_lines,
+        'auto_corrected_lines': auto_corrected_lines
     }
 
 

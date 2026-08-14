@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Gestão de Linhas & Projetos - Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-diagram-3"></i> Gestão de Linhas & Projetos</h1>
+    <div>
+        <button type="button" class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#lineModal" id="btnAddLine">
+            <i class="bi bi-plus-circle"></i> Nova Linha
+        </button>
+        <a href="{{ url_for('admin.admin_home') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Painel Admin
+        </a>
+    </div>
+</div>
+
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<!-- Filter bar -->
+<div class="card shadow mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('admin.lines') }}" class="row g-3">
+            <div class="col-md-5">
+                <label class="form-label">Buscar Linha</label>
+                <input type="text" class="form-control" name="search" value="{{ search }}" placeholder="Nome da linha...">
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Filtrar por Projeto</label>
+                <select class="form-select" name="project">
+                    <option value="">Todos</option>
+                    {% for p in projects %}
+                    <option value="{{ p }}" {% if project_filter == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-funnel"></i> Filtrar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Lines Table -->
+<div class="card shadow">
+    <div class="card-header">
+        <strong>Linhas Configuradas</strong>
+        <span class="text-muted ms-2">— {{ lines|length }} linha(s)</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Linha</th>
+                        <th>Projeto</th>
+                        <th>Funcionários</th>
+                        <th>Turnos Atribuídos</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for l in lines %}
+                    <tr>
+                        <td><strong>#{{ l.id }}</strong></td>
+                        <td>{{ l.name }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ l.project }}</span></td>
+                        <td>{{ l.allocated_employees }}</td>
+                        <td>{{ l.assigned_shifts }}</td>
+                        <td>
+                            {% if l.is_active %}
+                                <span class="badge bg-success">Ativo</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Inativo</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary me-1 btn-edit-line"
+                                    data-id="{{ l.id }}"
+                                    data-name="{{ l.name }}"
+                                    data-project="{{ l.project }}"
+                                    data-bs-toggle="modal" data-bs-target="#lineModal">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <form method="POST" action="{{ url_for('admin.lines_toggle', line_id=l.id) }}" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-{{ 'warning' if l.is_active else 'success' }}">
+                                    <i class="bi bi-toggle-on"></i> {{ 'Desativar' if l.is_active else 'Ativar' }}
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-4">
+                            <i class="bi bi-diagram-3 display-6 d-block mb-2"></i>
+                            Nenhuma linha encontrada.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Line Modal -->
+<div class="modal fade" id="lineModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('admin.lines_add') }}" id="lineForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="lineModalTitle">
+                        <i class="bi bi-plus-circle"></i> Nova Linha
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Nome da Linha</label>
+                        <input type="text" class="form-control" name="name" id="lineName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Projeto</label>
+                        <input type="text" class="form-control" name="project" id="lineProject" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="lineSubmitBtn">
+                        <i class="bi bi-check-lg"></i> Salvar Linha
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Edit mode
+        document.querySelectorAll('.btn-edit-line').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const id = this.dataset.id;
+                const name = this.dataset.name;
+                const project = this.dataset.project;
+
+                document.getElementById('lineModalTitle').innerHTML =
+                    '<i class="bi bi-pencil"></i> Editar Linha #' + id;
+                document.getElementById('lineForm').action = '/admin/lines/edit/' + id;
+                document.getElementById('lineName').value = name;
+                document.getElementById('lineProject').value = project;
+                document.getElementById('lineSubmitBtn').innerHTML =
+                    '<i class="bi bi-check-lg"></i> Atualizar Linha';
+            });
+        });
+
+        // Reset modal for "Add" mode
+        document.getElementById('btnAddLine').addEventListener('click', function() {
+            document.getElementById('lineModalTitle').innerHTML =
+                '<i class="bi bi-plus-circle"></i> Nova Linha';
+            document.getElementById('lineForm').action = '/admin/lines/add';
+            document.getElementById('lineName').value = '';
+            document.getElementById('lineProject').value = '';
+            document.getElementById('lineSubmitBtn').innerHTML =
+                '<i class="bi bi-check-lg"></i> Salvar Linha';
+        });
+    });
+</script>
+{% endblock %}

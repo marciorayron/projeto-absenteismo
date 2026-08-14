@@ -20,43 +20,13 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
-                    {% if current_user.role == 'LIDER' %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('leader.index') }}">
-                            <i class="bi bi-person-check"></i> Operação
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard.index') }}">
-                            <i class="bi bi-bar-chart"></i> Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('reports.index') }}">
-                            <i class="bi bi-file-earmark-text"></i> Relatórios
-                        </a>
-                    </li>
-                    {% elif current_user.role == 'ADMIN' %}
+                    {% if current_user.role == 'ADMIN' %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('admin.admin_home') }}">
                             <i class="bi bi-speedometer2"></i> Painel
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('admin.upload') }}">
-                            <i class="bi bi-cloud-upload"></i> Upload Excel
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('admin.users') }}">
-                            <i class="bi bi-people"></i> Usuários
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('admin.audit') }}">
-                            <i class="bi bi-journal-text"></i> Auditoria
-                        </a>
-                    </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('leader.index') }}">
                             <i class="bi bi-person-check"></i> Operação
@@ -72,7 +42,6 @@
                             <i class="bi bi-file-earmark-text"></i> Relatórios
                         </a>
                     </li>
-                    {% endif %}
                 </ul>
                 <ul class="navbar-nav">
                     <li class="nav-item dropdown">
@@ -83,6 +52,10 @@
                             </span>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalChangePassword">
+                                <i class="bi bi-key"></i> Alterar Senha
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">
                                 <i class="bi bi-box-arrow-right"></i> Sair
                             </a></li>
@@ -107,6 +80,38 @@
         {% endwith %}
 
         {% block content %}{% endblock %}
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="modal fade" id="modalChangePassword" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <form method="POST" action="{{ url_for('auth.change_password') }}">
+                    <div class="modal-header bg-dark text-white">
+                        <h5 class="modal-title"><i class="bi bi-key"></i> Alterar Senha</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Senha Atual</label>
+                            <input type="password" name="current_password" class="form-control" required autocomplete="current-password">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nova Senha</label>
+                            <input type="password" name="new_password" class="form-control" minlength="6" required autocomplete="new-password">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Confirmar Nova Senha</label>
+                            <input type="password" name="confirm_password" class="form-control" minlength="6" required autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Salvar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

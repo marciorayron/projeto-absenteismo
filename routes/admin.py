@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, current_app, session
 from flask_login import login_required, current_user
 from extensions import db, bcrypt
 from models.user import User
@@ -7,10 +7,16 @@ from models.allocation import Allocation
 from models.attendance import Attendance
 from models.audit_log import AuditLog
 from models.shift import Shift
+from models.line import Line
+from models.leader_scope import LeaderScope
 from services.excel_service import process_excel_upload, generate_absenteeism_report
 from services.metrics_service import calculate_shift_net_minutes
 from functools import wraps
+import io
 import os
+import json
+import sqlite3
+import pandas as pd
 from datetime import date, datetime
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -69,12 +75,8 @@ def upload():
 
         try:
             result = process_excel_upload(temp_path, user_id=current_user.id)
-            flash(
-                f'Upload processado: {result["employees_inserted"]} novos, '
-                f'{result["employees_updated"]} atualizados, '
-                f'{result["allocations_created"]} novas alocações.',
-                'success'
-            )
+            session['upload_summary'] = result
+            flash('Upload processado com sucesso.', 'success')
         except ValueError as e:
             flash(f'Erro no arquivo: {str(e)}', 'danger')
         except Exception as e:
@@ -85,7 +87,67 @@ def upload():
 
         return redirect(url_for('admin.upload'))
 
-    return render_template('admin/upload.html')
+    summary = session.pop('upload_summary', None)
+    return render_template('admin/upload.html', summary=summary)
+
+
+def _parse_managed_scope(form):
+    """Parse the managed-scope JSON into a list of {shift, line_id} dicts."""
+    raw = form.get('managed_scope', '')
+    items = []
+    if not raw:
+        return items
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return items
+    if not isinstance(data, list):
+        return items
+    seen = set()
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            shift = int(item.get('shift'))
+            line_id = int(item.get('line_id'))
+        except (TypeError, ValueError):
+            continue
+        key = (shift, line_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({'shift': shift, 'line_id': line_id})
+    return items
+
+
+def _apply_scopes(user, items):
+    """Replace the user's managed scopes with the given {shift, line_id} items."""
+    user.managed_scopes.clear()
+    for item in items:
+        user.managed_scopes.append(LeaderScope(line_id=item['line_id'], shift_id=item['shift']))
+
+
+def _get_available_scopes():
+    """Return sorted distinct (shift, line, project) combos resolved against Line/Allocation."""
+    lines_by_key = {(l.name, l.project): l.id for l in Line.query.filter_by(is_active=True).all()}
+    rows = db.session.query(
+        Allocation.shift, Allocation.project, Allocation.line
+    ).filter(Allocation.end_date.is_(None)).distinct().all()
+    scopes = []
+    for shift, project, line_name in rows:
+        if not line_name:
+            continue
+        line_id = lines_by_key.get((line_name, project or ''))
+        if line_id is None:
+            continue
+        scopes.append({
+            'shift': shift,
+            'line_id': line_id,
+            'line': line_name,
+            'project': project or ''
+        })
+    scopes.sort(key=lambda x: (x['shift'] or 0, x['project'], x['line']))
+    return scopes
 
 
 @admin_bp.route('/users', methods=['GET', 'POST'])
@@ -96,6 +158,7 @@ def users():
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         role = request.form.get('role', 'LIDER')
+        scope_items = _parse_managed_scope(request.form)
 
         if not username or not password:
             flash('Usuário e senha são obrigatórios.', 'warning')
@@ -109,13 +172,28 @@ def users():
                 is_active=True
             )
             db.session.add(user)
+            db.session.flush()
+            _apply_scopes(user, scope_items)
             db.session.commit()
             flash(f'Usuário {username} criado com sucesso.', 'success')
 
         return redirect(url_for('admin.users'))
 
     all_users = User.query.all()
-    return render_template('admin/users.html', users=all_users)
+    available_scopes = _get_available_scopes()
+    return render_template('admin/users.html', users=all_users, available_scopes=available_scopes)
+
+
+@admin_bp.route('/users/<int:user_id>/lines', methods=['POST'])
+@admin_required
+def edit_user_lines(user_id):
+    """Update the managed scope (shift+project+line) assigned to a leader."""
+    user = User.query.get_or_404(user_id)
+    scope_items = _parse_managed_scope(request.form)
+    _apply_scopes(user, scope_items)
+    db.session.commit()
+    flash(f'Escopo de {user.username} atualizado.', 'success')
+    return redirect(url_for('admin.users'))
 
 
 @admin_bp.route('/users/<int:user_id>/toggle', methods=['POST'])
@@ -157,6 +235,7 @@ def _translate_action(action):
         'EMPLOYEE_CREATE': 'Funcionário Criado',
         'EMPLOYEE_UPDATE': 'Funcionário Atualizado',
         'EMPLOYEE_DELETE': 'Funcionário Removido',
+        'USER_PASSWORD_CHANGE': 'Alteração de Senha',
     }
     return translations.get(action, action.replace('_', ' ').title())
 
@@ -349,6 +428,138 @@ def export_excel():
     )
 
 
+# ─────────────────── DATABASE MANAGEMENT CENTER ───────────────────
+
+_TABLE_EXPORT_MAP = {
+    'employees': Employee,
+    'allocations': Allocation,
+    'attendances': Attendance,
+    'shifts': Shift,
+    'users': User,
+    'audit_logs': AuditLog,
+}
+
+_TABLE_LABELS = {
+    'employees': 'Funcionários',
+    'allocations': 'Alocações',
+    'attendances': 'Apontamentos',
+    'shifts': 'Turnos',
+    'users': 'Usuários',
+    'audit_logs': 'Auditoria',
+}
+
+SYSTEM_VERSION = '2.0.0'
+
+
+def _format_file_size(num_bytes):
+    """Return a human-readable file size string."""
+    if num_bytes < 1024:
+        return f'{num_bytes} B'
+    for unit in ('KB', 'MB', 'GB'):
+        num_bytes /= 1024.0
+        if num_bytes < 1024:
+            return f'{num_bytes:.2f} {unit}'
+    return f'{num_bytes:.2f} GB'
+
+
+@admin_bp.route('/database', methods=['GET'])
+@admin_required
+def database():
+    """Database management panel: record counts, exports, and protected resets."""
+    counts = {
+        'employees': Employee.query.count(),
+        'allocations': Allocation.query.count(),
+        'attendances': Attendance.query.count(),
+        'shifts': Shift.query.count(),
+        'users': User.query.count(),
+        'audit_logs': AuditLog.query.count(),
+    }
+
+    db_path = current_app.config.get('DB_PATH')
+    db_size = os.path.getsize(db_path) if db_path and os.path.exists(db_path) else 0
+
+    system_info = {
+        'system_version': SYSTEM_VERSION,
+        'sqlite_version': sqlite3.sqlite_version,
+        'db_path': db_path,
+        'db_size': _format_file_size(db_size),
+    }
+
+    return render_template(
+        'admin/database.html',
+        counts=counts,
+        labels=_TABLE_LABELS,
+        system_info=system_info
+    )
+
+
+@admin_bp.route('/database/export/<table_name>', methods=['GET'])
+@admin_required
+def database_export(table_name):
+    """Export all records of a table to an Excel (.xlsx) file."""
+    model = _TABLE_EXPORT_MAP.get(table_name)
+    if model is None:
+        flash('Tabela não encontrada.', 'danger')
+        return redirect(url_for('admin.database'))
+
+    records = model.query.all()
+    rows = [r.to_dict() for r in records]
+
+    df = pd.DataFrame(rows)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name=table_name[:31], index=False)
+    buffer.seek(0)
+
+    filename = f'{table_name}_{date.today().isoformat()}.xlsx'
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+@admin_bp.route('/database/clear-attendance', methods=['POST'])
+@admin_required
+def database_clear_attendance():
+    """Delete all attendance records (requires admin password re-entry)."""
+    password = request.form.get('password', '')
+    if not bcrypt.check_password_hash(current_user.password_hash, password):
+        flash('Senha incorreta. Ação cancelada.', 'danger')
+        return redirect(url_for('admin.database'))
+
+    deleted = Attendance.query.delete()
+    db.session.commit()
+    flash(f'{deleted} registro(s) de apontamento removido(s).', 'success')
+    return redirect(url_for('admin.database'))
+
+
+@admin_bp.route('/database/clear-employees', methods=['POST'])
+@admin_required
+def database_clear_employees():
+    """Delete Employee & Allocation records (requires admin password re-entry).
+
+    Attendance records are also removed because they reference employees and
+    allocations via foreign keys — leaving them would create orphaned rows.
+    """
+    password = request.form.get('password', '')
+    if not bcrypt.check_password_hash(current_user.password_hash, password):
+        flash('Senha incorreta. Ação cancelada.', 'danger')
+        return redirect(url_for('admin.database'))
+
+    deleted_att = Attendance.query.delete()
+    deleted_alloc = Allocation.query.delete()
+    deleted_emp = Employee.query.delete()
+    db.session.commit()
+    flash(
+        f'Removidos: {deleted_emp} funcionário(s), {deleted_alloc} alocação(ões) '
+        f'e {deleted_att} apontamento(s).',
+        'success'
+    )
+    return redirect(url_for('admin.database'))
+
+
 # ─────────────────── SHIFT MANAGEMENT CRUD ───────────────────
 
 @admin_bp.route('/shifts', methods=['GET'])
@@ -357,6 +568,25 @@ def shifts():
     """List all configured shifts."""
     all_shifts = Shift.query.order_by(Shift.id).all()
     return render_template('admin/shifts.html', shifts=all_shifts)
+
+
+def _parse_work_days(form):
+    """Parse weekday checkboxes into a comma-separated string (0=Monday .. 6=Sunday).
+
+    Falls back to Monday-Friday (``0,1,2,3,4``) when nothing valid is selected.
+    """
+    selected = form.getlist('work_days')
+    days = set()
+    for raw in selected:
+        try:
+            idx = int(raw)
+        except (ValueError, TypeError):
+            continue
+        if 0 <= idx <= 6:
+            days.add(idx)
+    if not days:
+        return '0,1,2,3,4'
+    return ','.join(str(d) for d in sorted(days))
 
 
 @admin_bp.route('/shifts/add', methods=['POST'])
@@ -368,6 +598,7 @@ def shifts_add():
     start_time = request.form.get('start_time', '').strip()
     end_time = request.form.get('end_time', '').strip()
     break_minutes = request.form.get('break_minutes', 0, type=int)
+    work_days = _parse_work_days(request.form)
 
     if not shift_id or not name or not start_time or not end_time:
         flash('Todos os campos são obrigatórios.', 'warning')
@@ -387,7 +618,8 @@ def shifts_add():
         break_minutes=break_minutes,
         net_work_minutes=net,
         is_overnight=overnight,
-        is_active=True
+        is_active=True,
+        work_days=work_days
     )
     db.session.add(shift)
     db.session.commit()
@@ -405,6 +637,7 @@ def shifts_edit(shift_id):
     shift.start_time = request.form.get('start_time', shift.start_time).strip()
     shift.end_time = request.form.get('end_time', shift.end_time).strip()
     shift.break_minutes = request.form.get('break_minutes', shift.break_minutes, type=int)
+    shift.work_days = _parse_work_days(request.form)
 
     net, overnight = calculate_shift_net_minutes(
         shift.start_time, shift.end_time, shift.break_minutes
@@ -427,6 +660,98 @@ def shifts_toggle(shift_id):
     status = 'ativado' if shift.is_active else 'desativado'
     flash(f'Turno "{shift.name}" {status}.', 'success')
     return redirect(url_for('admin.shifts'))
+
+
+# ─────────────────── LINE & PROJECT MANAGEMENT CRUD ───────────────────
+
+@admin_bp.route('/lines', methods=['GET'])
+@admin_required
+def lines():
+    """List all lines with allocation and assignment counts."""
+    search = request.args.get('search', '').strip()
+    project_filter = request.args.get('project', '').strip()
+
+    query = Line.query
+    if search:
+        query = query.filter(Line.name.ilike(f'%{search}%'))
+    if project_filter:
+        query = query.filter(Line.project.ilike(f'%{project_filter}%'))
+
+    all_lines = query.order_by(Line.project, Line.name).all()
+    projects = sorted({l.project for l in Line.query.all() if l.project})
+
+    for line in all_lines:
+        line.allocated_employees = Allocation.query.filter_by(
+            line=line.name, project=line.project, end_date=None
+        ).count()
+        line.assigned_shifts = LeaderScope.query.filter_by(line_id=line.id).count()
+
+    return render_template(
+        'admin/lines.html',
+        lines=all_lines,
+        projects=projects,
+        search=search,
+        project_filter=project_filter
+    )
+
+
+@admin_bp.route('/lines/add', methods=['POST'])
+@admin_required
+def lines_add():
+    """Create a new line."""
+    name = request.form.get('name', '').strip()
+    project = request.form.get('project', '').strip()
+
+    if not name or not project:
+        flash('Nome da linha e projeto são obrigatórios.', 'warning')
+        return redirect(url_for('admin.lines'))
+
+    if Line.query.filter_by(name=name, project=project).first():
+        flash('Já existe uma linha com este nome e projeto.', 'danger')
+        return redirect(url_for('admin.lines'))
+
+    db.session.add(Line(name=name, project=project, is_active=True))
+    db.session.commit()
+    flash(f'Linha "{name}" criada com sucesso.', 'success')
+    return redirect(url_for('admin.lines'))
+
+
+@admin_bp.route('/lines/edit/<int:line_id>', methods=['POST'])
+@admin_required
+def lines_edit(line_id):
+    """Edit a line's name and project."""
+    line = Line.query.get_or_404(line_id)
+    name = request.form.get('name', '').strip()
+    project = request.form.get('project', '').strip()
+
+    if not name or not project:
+        flash('Nome da linha e projeto são obrigatórios.', 'warning')
+        return redirect(url_for('admin.lines'))
+
+    conflict = Line.query.filter(
+        Line.name == name, Line.project == project, Line.id != line_id
+    ).first()
+    if conflict:
+        flash('Já existe uma linha com este nome e projeto.', 'danger')
+        return redirect(url_for('admin.lines'))
+
+    line.name = name
+    line.project = project
+    db.session.commit()
+    flash(f'Linha "{name}" atualizada com sucesso.', 'success')
+    return redirect(url_for('admin.lines'))
+
+
+@admin_bp.route('/lines/toggle/<int:line_id>', methods=['POST'])
+@admin_required
+def lines_toggle(line_id):
+    """Activate or deactivate a line."""
+    line = Line.query.get_or_404(line_id)
+    line.is_active = not line.is_active
+    db.session.commit()
+    status = 'ativada' if line.is_active else 'desativada'
+    flash(f'Linha "{line.name}" {status}.', 'success')
+    return redirect(url_for('admin.lines'))
 
 
 # ─────────────────── EMPLOYEE VACATION MANAGEMENT ───────────────────

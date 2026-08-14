@@ -5,6 +5,9 @@ from models.employee import Employee
 from models.allocation import Allocation
 from models.attendance import Attendance
 from models.line_validation import LineValidation
+from models.user import User
+from models.line import Line
+from models.leader_scope import LeaderScope
 from services.metrics_service import calculate_bradford_bulk
 from datetime import date, datetime, timedelta
 
@@ -549,3 +552,60 @@ def api_bradford_top_risks():
     # Sort by score descending, high-risk first
     risks.sort(key=lambda x: (x['risk_level'] != 'high', -x['bradford_score']))
     return jsonify({'risks': risks[:20]})
+
+
+@dashboard_bp.route('/api/pending-audits')
+@login_required
+def api_pending_audits():
+    """Return the structured list of non-audited (line, shift, date) combos with the assigned leader."""
+    start, end, error, code = _parse_date_range()
+    if error:
+        return error, code
+
+    # Build (line, shift) -> leader usernames map by joining LeaderScope via FKs
+    scope_leader_map = {}
+    scope_rows = db.session.query(
+        Line.name, LeaderScope.shift_id, User.username
+    ).join(Line, LeaderScope.line_id == Line.id).join(
+        User, LeaderScope.user_id == User.id
+    ).filter(User.role == 'LIDER').all()
+    for line_name, shift_id, username in scope_rows:
+        scope_leader_map.setdefault((line_name, shift_id), []).append(username)
+
+    # Distinct (line, shift, date) combos that have attendance but no validation
+    rows = db.session.query(
+        Allocation.line, Allocation.shift, Attendance.record_date
+    ).join(
+        Attendance, Attendance.allocation_id == Allocation.id
+    ).filter(
+        Allocation.end_date.is_(None),
+        Allocation.line.isnot(None),
+        Allocation.line != '',
+        Attendance.record_date >= start,
+        Attendance.record_date <= end
+    ).distinct().all()
+
+    # Build the set of validated (line, shift, date) combos
+    validated = {
+        (v.line, v.shift, v.record_date)
+        for v in LineValidation.query.filter(
+            LineValidation.record_date >= start,
+            LineValidation.record_date <= end
+        ).all()
+    }
+
+    pending = []
+    for line, shift, rec_date in rows:
+        if (line, shift, rec_date) in validated:
+            continue
+        leaders = scope_leader_map.get((line, shift), [])
+        pending.append({
+            'date': rec_date.isoformat(),
+            'shift': shift,
+            'line': line,
+            'leader': ', '.join(leaders) if leaders else 'Não atribuído',
+            'status': 'Pendente'
+        })
+
+    pending.sort(key=lambda x: (x['date'], x['shift'], x['line']))
+    return jsonify({'pending': pending})

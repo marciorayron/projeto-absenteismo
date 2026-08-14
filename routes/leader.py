@@ -38,6 +38,35 @@ def _is_shift_closed(shift_id):
     return now > end_dt + timedelta(hours=2)
 
 
+def _is_off_day(shift_id, day):
+    """Return True if `day` (datetime.date) is NOT a working day for the shift.
+
+    A shift with no ``work_days`` configured is treated as working every day
+    (backward compatible with records created before this feature).
+    """
+    shift_def = Shift.query.get(shift_id)
+    if not shift_def or not shift_def.work_days:
+        return False
+    days = [d.strip() for d in shift_def.work_days.split(',') if d.strip() != '']
+    return str(day.weekday()) not in days
+
+
+def _get_leader_line_shifts(managed_scopes):
+    """Return the distinct (line_name, shift_id) tuples from the leader's LeaderScope rows."""
+    result = []
+    seen = set()
+    for scope in managed_scopes:
+        line = scope.line.name if scope.line else None
+        shift = scope.shift_id
+        if not line or shift is None:
+            continue
+        if (line, shift) in seen:
+            continue
+        seen.add((line, shift))
+        result.append((line, shift))
+    return result
+
+
 @leader_bp.route('/')
 @login_required
 def index():
@@ -110,6 +139,11 @@ def index():
         ).all()
         attendance_map = {a.employee_id: a for a in att_records}
 
+    # Working-days lookup (built once to avoid N+1) and weekday of the selected date
+    all_shifts = Shift.query.all()
+    shift_work_days = {s.id: s for s in all_shifts}
+    weekday_idx = parsed_date.weekday()
+
     employee_list = []
     for alloc, emp in pagination.items:
         on_vacation = (
@@ -117,11 +151,17 @@ def index():
             and emp.vacation_end is not None
             and emp.vacation_start <= parsed_date <= emp.vacation_end
         )
+        shift_def = shift_work_days.get(alloc.shift)
+        is_off_day = False
+        if shift_def and shift_def.work_days:
+            work_days = {d.strip() for d in shift_def.work_days.split(',') if d.strip() != ''}
+            is_off_day = str(weekday_idx) not in work_days
         employee_list.append({
             'allocation': alloc,
             'employee': emp,
             'attendance': attendance_map.get(emp.id),
-            'on_vacation': on_vacation
+            'on_vacation': on_vacation,
+            'is_off_day': is_off_day
         })
 
     # Line validation status
@@ -148,7 +188,6 @@ def index():
             }
 
     # Build shift schedules and closed status for frontend lock
-    all_shifts = Shift.query.all()
     shift_schedules = {}
     closed_shift_ids = set()
     for s in all_shifts:
@@ -159,6 +198,23 @@ def index():
         }
         if _is_shift_closed(s.id):
             closed_shift_ids.add(s.id)
+
+    # Leader grouped operation audit status (single top button)
+    managed_scopes = current_user.managed_scopes if current_user.role == 'LIDER' else []
+    managed_scope_count = len(managed_scopes)
+    operation_audited = False
+    if current_user.role == 'LIDER':
+        line_shifts = _get_leader_line_shifts(managed_scopes)
+        if line_shifts:
+            pending = [
+                (ln, sh) for ln, sh in line_shifts
+                if not LineValidation.query.filter_by(
+                    record_date=parsed_date, line=ln, shift=sh
+                ).first()
+            ]
+            operation_audited = len(pending) == 0
+        else:
+            operation_audited = True  # nothing to audit
 
     return render_template(
         'leader/index.html',
@@ -178,7 +234,9 @@ def index():
         line_validation_status=line_validation_status,
         can_validate=can_validate,
         shift_schedules=shift_schedules,
-        closed_shift_ids=closed_shift_ids
+        closed_shift_ids=closed_shift_ids,
+        managed_scope_count=managed_scope_count,
+        operation_audited=operation_audited
     )
 
 
@@ -227,6 +285,11 @@ def register():
             pass
 
     parsed_date = datetime.strptime(record_date, '%Y-%m-%d').date()
+
+    # Off-day lock: prevent absence/delay/early-exit registrations on non-working days
+    if event_type in ('FULL_ABSENCE', 'LATE_ARRIVAL', 'EARLY_EXIT') and _is_off_day(alloc.shift, parsed_date):
+        flash('Operação bloqueada: Esta data é um dia de folga do turno.', 'danger')
+        return redirect(url_for('leader.index', date=record_date))
 
     # Check for existing attendance record
     existing = Attendance.query.filter_by(
@@ -312,8 +375,13 @@ def api_quick_action():
     event_type = data.get('event_type')
     check_in = data.get('check_in', '')
     check_out = data.get('check_out', '')
-    justification_type = data.get('justification_type')
-    notes = data.get('notes', '').strip() or None
+
+    # Safe extraction for optional string fields (handles missing keys and explicit null)
+    notes_raw = data.get('notes')
+    notes = notes_raw.strip() if isinstance(notes_raw, str) and notes_raw.strip() else None
+
+    justification_raw = data.get('justification_type')
+    justification_type = justification_raw.strip() if isinstance(justification_raw, str) and justification_raw.strip() else None
 
     if not employee_id or not record_date_str or not event_type:
         return jsonify({'success': False, 'error': 'Dados obrigatórios ausentes.'}), 400
@@ -347,6 +415,10 @@ def api_quick_action():
         record_date = datetime.strptime(record_date_str, '%Y-%m-%d').date()
     except ValueError:
         return jsonify({'success': False, 'error': 'Data inválida.'}), 400
+
+    # Off-day lock: prevent absence/delay/early-exit registrations on non-working days
+    if event_type in ('FULL_ABSENCE', 'LATE_ARRIVAL', 'EARLY_EXIT') and _is_off_day(alloc.shift, record_date):
+        return jsonify({'success': False, 'error': 'Operação bloqueada: Esta data é um dia de folga do turno.'}), 400
 
     effective_type, minutes_lost = calculate_lost_minutes(
         alloc.shift, event_type, check_in_time, check_out_time, current_app.config
@@ -547,6 +619,56 @@ def api_validate_line():
         'message': 'Linha auditada com sucesso!',
         'validated_at': validation.validated_at.strftime('%d/%m/%Y %H:%M'),
         'validated_by': current_user.username
+    })
+
+
+@leader_bp.route('/api/audit-operation', methods=['POST'])
+@login_required
+def api_audit_operation():
+    """Audit all lines assigned to the current leader for a date in a single action."""
+    if current_user.role not in ['LIDER', 'ADMIN']:
+        return jsonify({'success': False, 'error': 'Permissão negada.'}), 403
+
+    data = request.get_json() or {}
+    record_date_str = data.get('record_date')
+    if not record_date_str:
+        return jsonify({'success': False, 'error': 'Data obrigatória.'}), 400
+
+    try:
+        record_date = datetime.strptime(record_date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Data inválida.'}), 400
+
+    managed_scopes = current_user.managed_scopes
+    if not managed_scopes:
+        return jsonify({'success': False, 'error': 'Você não possui linhas atribuídas. Contate o administrador.'}), 400
+
+    line_shifts = _get_leader_line_shifts(managed_scopes)
+    if not line_shifts:
+        return jsonify({'success': False, 'error': 'Nenhuma linha ativa encontrada para a sua operação.'}), 400
+
+    created = 0
+    for line, shift in line_shifts:
+        existing = LineValidation.query.filter_by(
+            record_date=record_date, line=line, shift=shift
+        ).first()
+        if existing:
+            continue
+        db.session.add(LineValidation(
+            record_date=record_date,
+            line=line,
+            shift=shift,
+            validated_by_id=current_user.id
+        ))
+        created += 1
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'{created} linha(s) auditada(s) com sucesso!',
+        'audited_count': created,
+        'total_lines': len(managed_scopes)
     })
 
 

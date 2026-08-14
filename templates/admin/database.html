@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Central de Banco de Dados - Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-database"></i> Central de Banco de Dados</h1>
+    <a href="{{ url_for('admin.admin_home') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Painel Admin
+    </a>
+</div>
+
+<!-- Table record counts -->
+<div class="row mb-4">
+    {% for key, count in counts.items() %}
+    <div class="col-md-4 mb-3">
+        <div class="card shadow h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="card-title mb-0 text-muted"><i class="bi bi-table"></i> {{ labels.get(key, key) }}</h6>
+                    <a href="{{ url_for('admin.database_export', table_name=key) }}" class="btn btn-sm btn-success">
+                        <i class="bi bi-file-earmark-excel"></i> Excel
+                    </a>
+                </div>
+                <h2 class="mt-2 mb-0">{{ count }}</h2>
+                <small class="text-muted">registro(s)</small>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- System info -->
+<div class="card shadow mb-4">
+    <div class="card-header">
+        <strong><i class="bi bi-info-circle"></i> Informações do Sistema</strong>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <tbody>
+                <tr>
+                    <td style="width: 220px;" class="text-muted">Versão do Sistema</td>
+                    <td><strong>{{ system_info.system_version }}</strong></td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Versão do SQLite</td>
+                    <td>{{ system_info.sqlite_version }}</td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Caminho do Banco</td>
+                    <td><code>{{ system_info.db_path }}</code></td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Tamanho do Arquivo</td>
+                    <td>{{ system_info.db_size }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Danger zone -->
+<div class="card shadow border-danger">
+    <div class="card-header bg-danger text-white">
+        <strong><i class="bi bi-exclamation-triangle"></i> Zona de Risco</strong>
+    </div>
+    <div class="card-body">
+        <p class="text-muted mb-3">
+            Ações destrutivas e irreversíveis. Exigem a confirmação da senha do administrador.
+        </p>
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#clearAttendanceModal">
+                <i class="bi bi-trash"></i> Limpar Apontamentos
+            </button>
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#clearEmployeesModal">
+                <i class="bi bi-trash"></i> Limpar Funcionários
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Clear Attendance Modal -->
+<div class="modal fade" id="clearAttendanceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('admin.database_clear_attendance') }}">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-trash"></i> Limpar Apontamentos</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        Todos os registros de presença, faltas, atrasos e saídas serão removidos permanentemente.
+                    </div>
+                    <label class="form-label">Confirme sua senha</label>
+                    <input type="password" name="password" class="form-control" required autocomplete="current-password">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-danger">Confirmar Exclusão</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Clear Employees Modal -->
+<div class="modal fade" id="clearEmployeesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('admin.database_clear_employees') }}">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-trash"></i> Limpar Funcionários</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        Todos os funcionários e suas alocações serão removidos permanentemente.
+                        Os apontamentos vinculados também serão excluídos.
+                    </div>
+                    <label class="form-label">Confirme sua senha</label>
+                    <input type="password" name="password" class="form-control" required autocomplete="current-password">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-danger">Confirmar Exclusão</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

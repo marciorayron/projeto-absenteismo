@@ -53,11 +53,12 @@
     </div>
 </div>
 
-<!-- Pending validation badge -->
+<!-- Pending validation badge (clickable) -->
 <div class="mb-4" id="pendingAlert" style="display: none;">
-    <div class="alert alert-warning d-flex align-items-center" role="alert">
+    <div class="alert alert-warning d-flex align-items-center" role="alert" id="pendingAlertBox" style="cursor: pointer;">
         <i class="bi bi-exclamation-triangle-fill me-2"></i>
         <span id="pendingText"></span>
+        <span class="ms-auto text-muted small"><i class="bi bi-search"></i> Clique para ver detalhes</span>
     </div>
 </div>
 
@@ -162,6 +163,41 @@
             <div class="card-header">Tendência Diária (Registros de Ausência)</div>
             <div class="card-body">
                 <canvas id="chartDailyTrend" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pending Audits Modal -->
+<div class="modal fade" id="modalPendingAudits" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill"></i> Registros Não Auditados</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Data</th>
+                                <th>Turno</th>
+                                <th>Linha Pendente</th>
+                                <th>Líder Responsável</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pendingAuditsBody">
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">Carregando...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
             </div>
         </div>
     </div>

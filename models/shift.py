@@ -12,6 +12,8 @@ class Shift(db.Model):
     net_work_minutes = db.Column(db.Integer, nullable=False)
     is_overnight = db.Column(db.Boolean, default=False)
     is_active = db.Column(db.Boolean, default=True)
+    # Comma-separated active weekdays: 0=Monday .. 6=Sunday. "0,1,2,3,4" = Mon-Fri.
+    work_days = db.Column(db.String(50), default="0,1,2,3,4")
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
     updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(),
                            onupdate=db.func.current_timestamp())
@@ -26,9 +28,21 @@ class Shift(db.Model):
             'net_work_minutes': self.net_work_minutes,
             'is_overnight': self.is_overnight,
             'is_active': self.is_active,
+            'work_days': self.work_days,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+    def is_working_day(self, weekday_idx):
+        """Return True if the given weekday index (0=Monday .. 6=Sunday) is a working day.
+
+        A shift with no ``work_days`` configured is treated as working every day
+        (backward compatible with records created before this feature).
+        """
+        if not self.work_days:
+            return True
+        days = [d.strip() for d in self.work_days.split(',') if d.strip() != '']
+        return str(weekday_idx) in days
 
     @property
     def net_hours_str(self):
