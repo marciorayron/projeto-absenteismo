@@ -1,5 +1,4 @@
 import io
-import difflib
 import pandas as pd
 import logging
 from datetime import date, datetime
@@ -12,11 +11,6 @@ from models.audit_log import AuditLog
 from models.line import Line
 
 logger = logging.getLogger(__name__)
-
-# Fuzzy-match threshold for auto-correcting line-name typos.
-# Set slightly below 0.88 to also catch single-character typos in short names
-# (e.g. "Consoli" vs "Console" ≈ 0.857).
-FUZZY_MATCH_THRESHOLD = 0.85
 
 
 def _strip_text(value):
@@ -32,7 +26,13 @@ def _strip_text(value):
 
 
 def _resolve_line(lines, line_name, project):
-    """Resolve (line_name, project) to a canonical Line, auto-creating or fuzzy-correcting.
+    """Resolve (line_name, project) to a canonical Line using strict exact match.
+
+    Lines are matched on a normalized exact basis: whitespace is stripped and
+    both name and project are compared case-insensitively (upper-cased). There
+    is NO fuzzy matching — distinct lines that merely share similar names are
+    preserved exactly. If no exact match exists in the catalog, a new Line is
+    provisioned without modifying any existing line.
 
     Args:
         lines (list): in-memory list of existing Line objects (updated on creation).
@@ -40,32 +40,18 @@ def _resolve_line(lines, line_name, project):
         project (str): raw project name from the spreadsheet.
 
     Returns:
-        tuple: (Line, action) where action is 'exact', 'fuzzy', or 'created'.
+        tuple: (Line, action) where action is 'exact' or 'created'.
     """
     line_name = _strip_text(line_name)
     project = _strip_text(project)
-    name_key = line_name.casefold()
-    proj_key = project.casefold()
+    name_key = line_name.upper()
+    proj_key = project.upper()
 
-    # 1. Exact match (case-insensitive)
     for l in lines:
-        if l.name.casefold() == name_key and l.project.casefold() == proj_key:
+        if l.name.strip().upper() == name_key and l.project.strip().upper() == proj_key:
             return l, 'exact'
 
-    # 2. Fuzzy match within the same project
-    best = None
-    best_ratio = 0.0
-    for l in lines:
-        if l.project.casefold() != proj_key:
-            continue
-        ratio = difflib.SequenceMatcher(None, name_key, l.name.casefold()).ratio()
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best = l
-    if best and best_ratio >= FUZZY_MATCH_THRESHOLD:
-        return best, 'fuzzy'
-
-    # 3. Auto-provision a new line
+    # No exact match -> auto-provision a new line (never touch similar lines).
     new_line = Line(name=line_name, project=project)
     db.session.add(new_line)
     db.session.flush()
@@ -120,18 +106,13 @@ def _clean_dataframe(df):
     return df
 
 
-def process_excel_upload(file_path, user_id=None):
-    """
-    Process an Excel file (.xlsx) with columns: ID, Nome, Turno, Projeto, Linha.
-    Performs upsert into employees and manages allocation_history records.
-    
-    Args:
-        file_path (str): Path to the .xlsx file.
-        user_id (int, optional): ID of the user performing the upload.
+def _norm_key(value):
+    """Normalize a string for exact (case-insensitive, whitespace-stripped) comparison."""
+    return _strip_text(value).upper()
 
-    Returns:
-        dict: Summary with counts of inserted/updated employees.
-    """
+
+def _load_dataframe(file_path):
+    """Read, validate and sanitize an Excel file into a ready DataFrame."""
     try:
         df = pd.read_excel(file_path, engine='openpyxl')
         logger.info(f"Excel file read successfully: {file_path} ({len(df)} raw rows).")
@@ -154,17 +135,11 @@ def process_excel_upload(file_path, user_id=None):
 
     # Convert shift to int safely
     df['Turno'] = pd.to_numeric(df['Turno'], errors='coerce').fillna(0).astype(int)
+    return df
 
-    today = date.today()
-    inserted_count = 0
-    updated_count = 0
-    allocation_created = 0
-    created_lines = []
-    auto_corrected_lines = []
 
-    # Load existing lines once; new lines are appended as they are auto-provisioned.
-    lines = Line.query.all()
-
+def _iter_rows(df):
+    """Yield normalized row dicts, skipping rows with invalid ID/Nome."""
     for _, row in df.iterrows():
         emp_id = _strip_text(row['ID'])
         name = _strip_text(row['Nome'])
@@ -177,14 +152,141 @@ def process_excel_upload(file_path, user_id=None):
             logger.warning(f"Skipping row with invalid ID='{emp_id}', Nome='{name}'.")
             continue
 
-        # Resolve the line (exact / fuzzy / auto-create) before allocation
+        yield {
+            'emp_id': emp_id,
+            'name': name,
+            'shift': shift,
+            'project': project,
+            'line': line,
+        }
+
+
+def analyze_excel_upload(file_path):
+    """Dry-run: parse an Excel file and compute preview stats WITHOUT writing to DB.
+
+    Also performs dual-key validation (matrícula + name) to detect collisions
+    where a name already exists under a different registration number.
+
+    Returns a dict with:
+        total_rows, new_employees_count, existing_employees_count,
+        new_lines_detected (list of {'project', 'line'}), allocations_count,
+        matricula_warnings (list of {'spreadsheet_id', 'existing_id', 'employee_name'}).
+    """
+    df = _load_dataframe(file_path)
+
+    lines = Line.query.all()
+    canonical_map = {
+        (_norm_key(l.project), _norm_key(l.name)): l for l in lines
+    }
+
+    employees = Employee.query.all()
+    employees_by_id = {e.id: e for e in employees}
+    name_to_employee = {}
+    for e in employees:
+        name_to_employee.setdefault(_norm_key(e.name), e)
+
+    active_allocs = {}
+    for a in Allocation.query.filter(Allocation.end_date.is_(None)).all():
+        active_allocs.setdefault(a.employee_id, a)
+
+    new_employees = set()
+    existing_employees = set()
+    new_lines = []
+    new_lines_set = set()
+    allocations_count = 0
+    matricula_warnings = []
+
+    for row in _iter_rows(df):
+        emp_id = row['emp_id']
+        name = row['name']
+        shift = row['shift']
+        project = row['project']
+        line = row['line']
+
+        # Dual-key validation: match by matrícula (ID), then by name.
+        by_id = employees_by_id.get(emp_id)
+        by_name = name_to_employee.get(_norm_key(name))
+
+        is_collision = False
+        if by_id is not None:
+            existing_employees.add(emp_id)
+        elif by_name is not None and by_name.id != emp_id:
+            # Name already exists under a different matrícula -> typo guard.
+            is_collision = True
+            matricula_warnings.append({
+                'spreadsheet_id': emp_id,
+                'existing_id': by_name.id,
+                'employee_name': name.upper(),
+            })
+        else:
+            new_employees.add(emp_id)
+
+        key = (_norm_key(project), _norm_key(line))
+        match = canonical_map.get(key)
+        if match:
+            canonical_project, canonical_line = match.project, match.name
+        else:
+            canonical_project, canonical_line = project, line
+            if key not in new_lines_set:
+                new_lines_set.add(key)
+                new_lines.append({'project': project, 'line': line})
+
+        # Collision rows are not imported; skip allocation counting for them.
+        if is_collision:
+            continue
+
+        current = active_allocs.get(emp_id)
+        if (current is None or current.shift != shift
+                or current.project != canonical_project
+                or current.line != canonical_line):
+            allocations_count += 1
+
+    return {
+        'total_rows': len(df),
+        'new_employees_count': len(new_employees),
+        'existing_employees_count': len(existing_employees),
+        'new_lines_detected': new_lines,
+        'allocations_count': allocations_count,
+        'matricula_warnings': matricula_warnings,
+    }
+
+
+def process_excel_upload(file_path, user_id=None):
+    """
+    Process an Excel file (.xlsx) with columns: ID, Nome, Turno, Projeto, Linha.
+    Performs upsert into employees and manages allocation_history records.
+    
+    Args:
+        file_path (str): Path to the .xlsx file.
+        user_id (int, optional): ID of the user performing the upload.
+
+    Returns:
+        dict: Summary with counts of inserted/updated employees.
+    """
+    df = _load_dataframe(file_path)
+
+    today = date.today()
+    inserted_count = 0
+    updated_count = 0
+    allocation_created = 0
+    created_lines = []
+
+    # Load existing lines once; new lines are appended as they are auto-provisioned.
+    lines = Line.query.all()
+
+    for row in _iter_rows(df):
+        emp_id = row['emp_id']
+        name = row['name']
+        shift = row['shift']
+        project = row['project']
+        line = row['line']
+
+        # Resolve the line (exact / auto-create) before allocation
         line_obj, action = _resolve_line(lines, line, project)
         canonical_line = line_obj.name
         canonical_project = line_obj.project
         if action == 'created':
             created_lines.append(canonical_line)
-        elif action == 'fuzzy':
-            auto_corrected_lines.append({'from': line, 'to': canonical_line})
 
         # Upsert employee
         employee = Employee.query.get(emp_id)
@@ -202,6 +304,18 @@ def process_excel_upload(file_path, user_id=None):
                     new_value=new_value
                 ))
         else:
+            # Matricula typo guard: don't create a duplicate if the name already
+            # exists under a different registration number.
+            existing_by_name = Employee.query.filter(
+                db.func.upper(Employee.name) == _norm_key(name)
+            ).first()
+            if existing_by_name and existing_by_name.id != emp_id:
+                logger.warning(
+                    f"Skipping employee '{name}' (ID {emp_id}): name already exists "
+                    f"under ID {existing_by_name.id}."
+                )
+                continue
+
             employee = Employee(id=emp_id, name=name)
             db.session.add(employee)
             db.session.flush()  # Flush to ensure employee is persisted
@@ -245,11 +359,23 @@ def process_excel_upload(file_path, user_id=None):
         # Flush to ensure allocation IDs are generated before next iteration
         db.session.flush()
 
+    # Audit trail for the confirmed import.
+    db.session.add(AuditLog(
+        user_id=user_id or 1,
+        action='EXCEL_IMPORT_CONFIRMED',
+        new_value={
+            'processed_rows': len(df),
+            'employees_inserted': inserted_count,
+            'employees_updated': updated_count,
+            'allocations_created': allocation_created,
+            'lines_created': created_lines,
+        }
+    ))
+
     db.session.commit()
     logger.info(
         f"Upload complete: {inserted_count} inserted, {updated_count} updated, "
-        f"{allocation_created} allocations created, {len(created_lines)} lines created, "
-        f"{len(auto_corrected_lines)} lines auto-corrected."
+        f"{allocation_created} allocations created, {len(created_lines)} lines created."
     )
 
     return {
@@ -259,7 +385,6 @@ def process_excel_upload(file_path, user_id=None):
         'employees_updated': updated_count,
         'allocations_created': allocation_created,
         'created_lines': created_lines,
-        'auto_corrected_lines': auto_corrected_lines
     }
 
 

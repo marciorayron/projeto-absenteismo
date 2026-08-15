@@ -150,6 +150,8 @@ def api_overview():
             return jsonify({
                 'total_employees': 0, 'total_records': 0, 'absent_employees': 0,
                 'absent_records': 0, 'absenteeism_rate': 0,
+                'presence_rate': 100.0, 'adherence_rate': 100.0,
+                'vacation_count': 0,
                 'total_lost_minutes': 0, 'total_lost_hours': 0,
                 'date_from': start.isoformat(), 'date_to': end.isoformat(),
                 'pending_validations': 0
@@ -178,7 +180,8 @@ def api_overview():
         db.func.coalesce(db.func.sum(Attendance.minutes_lost), 0).label('total_lost_minutes')
     ).filter(
         Attendance.record_date >= start,
-        Attendance.record_date <= end
+        Attendance.record_date <= end,
+        Attendance.event_type != 'VACATION'
     )
     if emp_ids is not None:
         agg = agg.filter(Attendance.employee_id.in_(emp_ids))
@@ -189,6 +192,19 @@ def api_overview():
     total_lost_minutes = agg_row.total_lost_minutes or 0
 
     absenteeism_rate = round((absent_employees / total_employees * 100), 2) if total_employees > 0 else 0
+    presence_rate = round(max(0, 100.0 - absenteeism_rate), 2)
+
+    # --- Vacation count: distinct active employees on vacation overlapping the period ---
+    vac_query = db.session.query(Employee.id).filter(
+        Employee.status == 'ACTIVE',
+        Employee.vacation_start.isnot(None),
+        Employee.vacation_end.isnot(None),
+        Employee.vacation_start <= end,
+        Employee.vacation_end >= start
+    )
+    if emp_ids is not None:
+        vac_query = vac_query.filter(Employee.id.in_(emp_ids))
+    vacation_count = db.session.query(db.func.count()).select_from(vac_query.subquery()).scalar() or 0
 
     # --- Pending validations: SQL-side aggregation ---
     # Count line/shift/date combos from Allocation+Attendance that have no LineValidation
@@ -222,8 +238,11 @@ def api_overview():
         'absent_records': absent_records,
         'absent_employees': absent_employees,
         'absenteeism_rate': absenteeism_rate,
+        'presence_rate': presence_rate,
+        'adherence_rate': presence_rate,
         'total_lost_minutes': total_lost_minutes,
         'total_lost_hours': round(total_lost_minutes / 60, 2),
+        'vacation_count': vacation_count,
         'date_from': start.isoformat(),
         'date_to': end.isoformat(),
         'pending_validations': pending
@@ -277,7 +296,8 @@ def api_by_line():
         Allocation.line.isnot(None),
         Allocation.line != '',
         Attendance.record_date >= start,
-        Attendance.record_date <= end
+        Attendance.record_date <= end,
+        Attendance.event_type != 'VACATION'
     )
 
     if emp_ids is not None:
@@ -296,14 +316,12 @@ def api_by_line():
 
         result.append({
             'line': line,
-            'headcount': headcount,
-            'absent_days': absent_days,
-            'lost_minutes': lost_minutes,
+            'rate': rate,
+            'absences_count': absent_days,
             'lost_hours': round(lost_minutes / 60, 2),
-            'absenteeism_rate': rate
         })
 
-    result.sort(key=lambda x: x['absenteeism_rate'], reverse=True)
+    result.sort(key=lambda x: x['rate'], reverse=True)
     return jsonify({'lines': result})
 
 
@@ -355,7 +373,8 @@ def api_by_project():
         Allocation.project.isnot(None),
         Allocation.project != '',
         Attendance.record_date >= start,
-        Attendance.record_date <= end
+        Attendance.record_date <= end,
+        Attendance.event_type != 'VACATION'
     )
 
     if emp_ids is not None:
@@ -376,14 +395,12 @@ def api_by_project():
 
         result.append({
             'project': project,
-            'headcount': headcount,
-            'absent_days': absent_days,
-            'lost_minutes': lost_minutes,
+            'rate': rate,
+            'absences_count': absent_days,
             'lost_hours': round(lost_minutes / 60, 2),
-            'absenteeism_rate': rate
         })
 
-    result.sort(key=lambda x: x['absenteeism_rate'], reverse=True)
+    result.sort(key=lambda x: x['rate'], reverse=True)
     return jsonify({'projects': result})
 
 
@@ -433,7 +450,8 @@ def api_by_shift():
     ).filter(
         Allocation.end_date.is_(None),
         Attendance.record_date >= start,
-        Attendance.record_date <= end
+        Attendance.record_date <= end,
+        Attendance.event_type != 'VACATION'
     )
 
     if emp_ids is not None:
@@ -456,13 +474,12 @@ def api_by_shift():
 
         result.append({
             'shift': shift_val,
-            'headcount': headcount,
-            'absent_days': absent_days,
-            'lost_minutes': lost_minutes,
+            'rate': rate,
+            'absences_count': absent_days,
             'lost_hours': round(lost_minutes / 60, 2),
-            'absenteeism_rate': rate
         })
 
+    result.sort(key=lambda x: x['rate'], reverse=True)
     return jsonify({'shifts': result})
 
 
@@ -489,7 +506,8 @@ def api_daily_trend():
         db.func.coalesce(db.func.sum(Attendance.minutes_lost), 0).label('lost_minutes')
     ).filter(
         Attendance.record_date >= start,
-        Attendance.record_date <= end
+        Attendance.record_date <= end,
+        Attendance.event_type != 'VACATION'
     )
 
     if emp_ids is not None:

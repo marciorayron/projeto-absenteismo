@@ -3,45 +3,50 @@
 {% block title %}Dashboard - Absenteísmo{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h1><i class="bi bi-bar-chart"></i> Dashboard de Absenteísmo</h1>
-    <a href="{{ url_for('admin.admin_home') }}" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Painel Admin
-    </a>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <h1 class="mb-0"><i class="bi bi-bar-chart"></i> Dashboard de Absenteísmo</h1>
+    <div class="d-flex align-items-center gap-2">
+        <button type="button" id="btnToggleFilters" class="btn btn-sm btn-outline-secondary"
+                data-bs-toggle="collapse" data-bs-target="#filterBody" aria-expanded="true" aria-controls="filterBody">
+            🔽 Ocultar Filtros
+        </button>
+        <a href="{{ url_for('admin.admin_home') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Painel Admin
+        </a>
+    </div>
 </div>
 
 <!-- Filters -->
-<div class="card mb-4">
-    <div class="card-body">
-        <form class="row g-3" id="dateFilter">
+<div class="card dashboard-filter-card mb-4">
+    <div class="card-body collapse show" id="filterBody">
+        <form class="row g-3 align-items-end" id="dateFilter">
             <div class="col-md-2">
-                <label class="form-label">Data Início</label>
-                <input type="date" class="form-control" id="dateFrom" name="date_from">
+                <label class="filter-label">Data Início</label>
+                <input type="date" class="form-control filter-input" id="dateFrom" name="date_from">
             </div>
             <div class="col-md-2">
-                <label class="form-label">Data Fim</label>
-                <input type="date" class="form-control" id="dateTo" name="date_to">
+                <label class="filter-label">Data Fim</label>
+                <input type="date" class="form-control filter-input" id="dateTo" name="date_to">
             </div>
             <div class="col-md-2">
-                <label class="form-label">Turno <small class="text-muted">(Ctrl+Click)</small></label>
-                <select multiple class="form-select" id="filterShift" name="shift" size="3"></select>
+                <label class="filter-label">Turno</label>
+                <select multiple class="form-select filter-input" id="filterShift" name="shift" size="3"></select>
+                <small class="text-muted filter-hint">Selecione um ou mais (Ctrl+Click)</small>
             </div>
             <div class="col-md-2">
-                <label class="form-label">Projeto <small class="text-muted">(Ctrl+Click)</small></label>
-                <select multiple class="form-select" id="filterProject" name="project" size="3"></select>
+                <label class="filter-label">Projeto</label>
+                <select multiple class="form-select filter-input" id="filterProject" name="project" size="3"></select>
+                <small class="text-muted filter-hint">Selecione um ou mais (Ctrl+Click)</small>
             </div>
             <div class="col-md-2">
-                <label class="form-label">Linha <small class="text-muted">(Ctrl+Click)</small></label>
-                <select multiple class="form-select" id="filterLine" name="line" size="3"></select>
+                <label class="filter-label">Linha</label>
+                <select multiple class="form-select filter-input" id="filterLine" name="line" size="3"></select>
+                <small class="text-muted filter-hint">Selecione um ou mais (Ctrl+Click)</small>
             </div>
-            <div class="col-md-2 d-flex align-items-end">
-                <div class="d-grid gap-1 w-100">
-                    <button type="button" class="btn btn-primary" id="applyFilter">
-                        <i class="bi bi-funnel"></i> Aplicar Filtro
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary" data-action="clear-filters">
-                        <i class="bi bi-eraser"></i> Limpar Filtros
-                    </button>
+            <div class="col-md-2">
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-primary" id="applyFilter">🔍 Aplicar Filtros</button>
+                    <button type="button" class="btn btn-outline-secondary" data-action="clear-filters">↺ Limpar</button>
                 </div>
             </div>
         </form>
@@ -93,36 +98,49 @@
 </div>
 
 <!-- KPI cards -->
-<div class="row mb-4" id="kpiCards">
-    <div class="col-md-3 mb-3">
-        <div class="card text-white bg-primary shadow">
-            <div class="card-body">
-                <h6 class="card-title"><i class="bi bi-people"></i> Total Funcionários</h6>
-                <h2 class="mb-0" id="kpiTotalEmployees">--</h2>
+<div class="kpi-grid mb-4" id="kpiCards">
+    <div class="card kpi-card kpi-slate">
+        <div class="card-body d-flex align-items-center">
+            <div class="kpi-icon kpi-icon-slate">👥</div>
+            <div class="ms-3">
+                <div class="kpi-label">Efetivo Total</div>
+                <div class="kpi-value" id="kpiTotalEmployees">--</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
-        <div class="card text-white bg-danger shadow">
-            <div class="card-body">
-                <h6 class="card-title"><i class="bi bi-exclamation-triangle"></i> Taxa Absenteísmo</h6>
-                <h2 class="mb-0" id="kpiAbsenteeismRate">--%</h2>
+    <div class="card kpi-card kpi-green">
+        <div class="card-body d-flex align-items-center">
+            <div class="kpi-icon kpi-icon-green">🟢</div>
+            <div class="ms-3">
+                <div class="kpi-label">Taxa de Presença (Aderência)</div>
+                <div class="kpi-value" id="kpiPresenceRate">--%</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
-        <div class="card text-white bg-warning shadow">
-            <div class="card-body">
-                <h6 class="card-title"><i class="bi bi-clock-history"></i> Horas Perdidas</h6>
-                <h2 class="mb-0" id="kpiLostHours">--</h2>
+    <div class="card kpi-card kpi-cyan">
+        <div class="card-body d-flex align-items-center">
+            <div class="kpi-icon kpi-icon-cyan">🏖️</div>
+            <div class="ms-3">
+                <div class="kpi-label">Férias no Período</div>
+                <div class="kpi-value" id="kpiVacationCount">--</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
-        <div class="card text-white bg-success shadow">
-            <div class="card-body">
-                <h6 class="card-title"><i class="bi bi-calendar-check"></i> Registros no Período</h6>
-                <h2 class="mb-0" id="kpiTotalRecords">--</h2>
+    <div class="card kpi-card kpi-red">
+        <div class="card-body d-flex align-items-center">
+            <div class="kpi-icon kpi-icon-red">⚠️</div>
+            <div class="ms-3">
+                <div class="kpi-label">Taxa de Absenteísmo</div>
+                <div class="kpi-value" id="kpiAbsenteeismRate">--%</div>
+            </div>
+        </div>
+    </div>
+    <div class="card kpi-card kpi-amber">
+        <div class="card-body d-flex align-items-center">
+            <div class="kpi-icon kpi-icon-amber">⏱️</div>
+            <div class="ms-3">
+                <div class="kpi-label">Horas Perdidas</div>
+                <div class="kpi-value" id="kpiLostHours">--</div>
             </div>
         </div>
     </div>
@@ -131,16 +149,36 @@
 <!-- Charts row 1 -->
 <div class="row mb-4">
     <div class="col-md-6 mb-4">
-        <div class="card shadow">
-            <div class="card-header">Absenteísmo por Linha</div>
+        <div class="card chart-card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Absenteísmo por Linha</span>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="btn-group btn-group-sm" id="lineSortGroup" role="group" aria-label="Ordenar por">
+                        <button type="button" class="btn btn-outline-secondary active" data-sort="rate">% Taxa</button>
+                        <button type="button" class="btn btn-outline-secondary" data-sort="absences">Qtd. Faltas</button>
+                        <button type="button" class="btn btn-outline-secondary" data-sort="hours">Horas</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary btn-toggle-trend" data-chart="line">📈 Tendência</button>
+                </div>
+            </div>
             <div class="card-body">
                 <canvas id="chartByLine" height="200"></canvas>
             </div>
         </div>
     </div>
     <div class="col-md-6 mb-4">
-        <div class="card shadow">
-            <div class="card-header">Absenteísmo por Projeto</div>
+        <div class="card chart-card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Absenteísmo por Projeto</span>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="btn-group btn-group-sm" id="projectSortGroup" role="group" aria-label="Ordenar por">
+                        <button type="button" class="btn btn-outline-secondary active" data-sort="rate">% Taxa</button>
+                        <button type="button" class="btn btn-outline-secondary" data-sort="absences">Qtd. Faltas</button>
+                        <button type="button" class="btn btn-outline-secondary" data-sort="hours">Horas</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary btn-toggle-trend" data-chart="project">📈 Tendência</button>
+                </div>
+            </div>
             <div class="card-body">
                 <canvas id="chartByProject" height="200"></canvas>
             </div>
@@ -151,15 +189,25 @@
 <!-- Charts row 2 -->
 <div class="row mb-4">
     <div class="col-md-6 mb-4">
-        <div class="card shadow">
-            <div class="card-header">Absenteísmo por Turno</div>
+        <div class="card chart-card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Absenteísmo por Turno</span>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="btn-group btn-group-sm" id="shiftSortGroup" role="group" aria-label="Ordenar por">
+                        <button type="button" class="btn btn-outline-secondary active" data-sort="rate">% Taxa</button>
+                        <button type="button" class="btn btn-outline-secondary" data-sort="absences">Qtd. Faltas</button>
+                        <button type="button" class="btn btn-outline-secondary" data-sort="hours">Horas</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary btn-toggle-trend" data-chart="shift">📈 Tendência</button>
+                </div>
+            </div>
             <div class="card-body">
                 <canvas id="chartByShift" height="200"></canvas>
             </div>
         </div>
     </div>
     <div class="col-md-6 mb-4">
-        <div class="card shadow">
+        <div class="card chart-card">
             <div class="card-header">Tendência Diária (Registros de Ausência)</div>
             <div class="card-body">
                 <canvas id="chartDailyTrend" height="200"></canvas>

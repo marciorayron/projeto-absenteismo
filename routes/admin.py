@@ -9,13 +9,15 @@ from models.audit_log import AuditLog
 from models.shift import Shift
 from models.line import Line
 from models.leader_scope import LeaderScope
-from services.excel_service import process_excel_upload, generate_absenteeism_report
+from services.excel_service import process_excel_upload, analyze_excel_upload, generate_absenteeism_report
 from services.metrics_service import calculate_shift_net_minutes
+from services.employee_service import migrate_employee_id
 from functools import wraps
 import io
 import os
 import json
 import sqlite3
+import uuid
 import pandas as pd
 from datetime import date, datetime
 
@@ -55,40 +57,94 @@ def admin_home():
     return render_template('admin/admin_home.html', stats=stats)
 
 
-@admin_bp.route('/upload', methods=['GET', 'POST'])
+@admin_bp.route('/upload', methods=['GET'])
 @admin_required
 def upload():
-    """Excel file upload handler."""
-    if request.method == 'POST':
-        file = request.files.get('excel_file')
-        if not file or not file.filename:
-            flash('Nenhum arquivo selecionado.', 'warning')
-            return redirect(url_for('admin.upload'))
-
-        if not file.filename.endswith('.xlsx'):
-            flash('Formato inválido. Envie um arquivo .xlsx.', 'danger')
-            return redirect(url_for('admin.upload'))
-
-        # Save to temp location
-        temp_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp_upload.xlsx')
-        file.save(temp_path)
-
-        try:
-            result = process_excel_upload(temp_path, user_id=current_user.id)
-            session['upload_summary'] = result
-            flash('Upload processado com sucesso.', 'success')
-        except ValueError as e:
-            flash(f'Erro no arquivo: {str(e)}', 'danger')
-        except Exception as e:
-            flash(f'Erro ao processar arquivo: {str(e)}', 'danger')
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-        return redirect(url_for('admin.upload'))
-
+    """Excel upload page (two-step: analyze then confirm)."""
     summary = session.pop('upload_summary', None)
     return render_template('admin/upload.html', summary=summary)
+
+
+def _upload_dir():
+    """Directory used to stage uploaded files awaiting confirmation."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _upload_path(token):
+    return os.path.join(_upload_dir(), f'upload_{token}.xlsx')
+
+
+def _clear_upload(token):
+    """Remove a staged temp file and clear its session token."""
+    path = _upload_path(token)
+    if os.path.exists(path):
+        os.remove(path)
+    if session.get('upload_token') == token:
+        session.pop('upload_token', None)
+
+
+@admin_bp.route('/upload/analyze', methods=['POST'])
+@admin_required
+def upload_analyze():
+    """Dry-run: stage the file and return a preview summary WITHOUT writing to DB."""
+    file = request.files.get('excel_file')
+    if not file or not file.filename:
+        return jsonify({'status': 'error', 'message': 'Nenhum arquivo selecionado.'}), 400
+
+    if not file.filename.endswith('.xlsx'):
+        return jsonify({'status': 'error', 'message': 'Formato inválido. Envie um arquivo .xlsx.'}), 400
+
+    token = uuid.uuid4().hex
+    temp_path = _upload_path(token)
+    file.save(temp_path)
+    session['upload_token'] = token
+
+    try:
+        summary = analyze_excel_upload(temp_path)
+    except ValueError as e:
+        _clear_upload(token)
+        return jsonify({'status': 'error', 'message': f'Erro no arquivo: {e}'}), 400
+    except Exception as e:
+        _clear_upload(token)
+        return jsonify({'status': 'error', 'message': f'Erro ao processar arquivo: {e}'}), 500
+
+    # Guarantee no partial writes leak into a subsequent transaction.
+    db.session.rollback()
+
+    return jsonify({'status': 'success', 'summary': summary})
+
+
+@admin_bp.route('/upload/confirm', methods=['POST'])
+@admin_required
+def upload_confirm():
+    """Commit the previously analyzed file to the database."""
+    token = session.get('upload_token')
+    if not token:
+        return jsonify({'status': 'error', 'message': 'Nenhuma planilha aguardando confirmação.'}), 400
+
+    temp_path = _upload_path(token)
+    if not os.path.exists(temp_path):
+        return jsonify({'status': 'error', 'message': 'Sessão de análise expirada. Reenvie a planilha.'}), 400
+
+    payload = request.get_json(silent=True) or {}
+
+    # Execute confirmed matricula migrations before importing allocations.
+    for m in payload.get('migrations', []):
+        try:
+            migrate_employee_id(m.get('old_id'), m.get('new_id'))
+        except ValueError as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 400
+
+    try:
+        result = process_excel_upload(temp_path, user_id=current_user.id)
+        session['upload_summary'] = result
+        flash('Importação confirmada com sucesso.', 'success')
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Erro ao importar: {e}'}), 500
+    finally:
+        _clear_upload(token)
+
+    return jsonify({'status': 'success', 'summary': result})
 
 
 def _parse_managed_scope(form):
@@ -824,4 +880,22 @@ def employee_vacation(employee_id):
         flash(f'Férias de {emp.name} definidas de {start} a {end}.', 'success')
     else:
         flash(f'Período de férias de {emp.name} removido.', 'success')
+    return redirect(back)
+
+
+@admin_bp.route('/employees/<employee_id>/migrate-id', methods=['POST'])
+@admin_required
+def employee_migrate_id(employee_id):
+    """Migrate an employee's registration number (matrícula) to a new ID."""
+    new_id = request.form.get('new_id', '').strip()
+    try:
+        new_emp = migrate_employee_id(employee_id, new_id)
+        flash(
+            f'Matrícula de {new_emp.name} alterada de {employee_id} para {new_emp.id} com sucesso.',
+            'success'
+        )
+    except ValueError as e:
+        flash(str(e), 'danger')
+
+    back = url_for('admin.employees', search=request.args.get('search', ''))
     return redirect(back)

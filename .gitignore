@@ -35,6 +35,7 @@ Thumbs.db
 
 # Temp files
 temp_upload.xlsx
+upload_*.xlsx
 
 # Excel uploads (keep sample if needed)
 # Cadastro Atual (22).xlsx

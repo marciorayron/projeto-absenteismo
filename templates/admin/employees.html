@@ -32,6 +32,7 @@
                         <th>Nome</th>
                         <th>Status</th>
                         <th style="min-width: 360px;">Período de Férias</th>
+                        <th>Ações</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -55,10 +56,17 @@
                             </form>
                             <small class="text-muted">Deixe as duas datas vazias para remover as férias.</small>
                         </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-warning btn-change-id"
+                                    data-employee-id="{{ emp.id }}"
+                                    data-employee-name="{{ emp.name }}">
+                                <i class="bi bi-arrow-left-right"></i> Alterar Matrícula
+                            </button>
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="4" class="text-center text-muted py-4">Nenhum funcionário encontrado.</td>
+                        <td colspan="5" class="text-center text-muted py-4">Nenhum funcionário encontrado.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -88,4 +96,54 @@
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+<!-- Modal Alterar Matrícula -->
+<div class="modal fade" id="modalChangeEmployeeId" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" id="migrateIdForm" action="">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title"><i class="bi bi-arrow-left-right"></i> Alterar Matrícula</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">Alterar a matrícula de <strong id="migrateEmployeeName"></strong>.</p>
+                    <label class="form-label" for="new_id">Novo Número de Matrícula</label>
+                    <input type="text" class="form-control" id="new_id" name="new_id" required>
+                    <small class="text-muted">O histórico de presenças, alocações e férias será preservado.</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Confirmar Alteração</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modalEl = document.getElementById('modalChangeEmployeeId');
+    const form = document.getElementById('migrateIdForm');
+    const nameSpan = document.getElementById('migrateEmployeeName');
+    const newIdInput = document.getElementById('new_id');
+
+    if (!modalEl || !form) return;
+
+    document.querySelectorAll('.btn-change-id').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const empId = btn.getAttribute('data-employee-id');
+            const empName = btn.getAttribute('data-employee-name');
+            const search = new URLSearchParams(window.location.search).get('search') || '';
+            form.action = '/admin/employees/' + encodeURIComponent(empId) + '/migrate-id' +
+                (search ? '?search=' + encodeURIComponent(search) : '');
+            nameSpan.textContent = empName + ' (matrícula atual: ' + empId + ')';
+            newIdInput.value = '';
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
+    });
+});
+</script>
 {% endblock %}

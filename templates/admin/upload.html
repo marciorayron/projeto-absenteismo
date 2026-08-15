@@ -24,11 +24,6 @@
         {% for l in summary.created_lines %}<span class="badge bg-info text-dark">{{ l }}</span> {% endfor %}
     </p>
     {% endif %}
-    {% if summary.auto_corrected_lines %}
-    <p class="mb-0">Linhas auto-corrigidas:
-        {% for c in summary.auto_corrected_lines %}<span class="badge bg-warning text-dark">{{ c.from }} &rarr; {{ c.to }}</span> {% endfor %}
-    </p>
-    {% endif %}
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
@@ -40,14 +35,14 @@
                 <h5 class="mb-0"><i class="bi bi-file-earmark-excel"></i> Enviar arquivo .xlsx</h5>
             </div>
             <div class="card-body">
-                <form method="POST" enctype="multipart/form-data" action="{{ url_for('admin.upload') }}">
+                <form id="uploadForm" enctype="multipart/form-data">
                     <div class="mb-3">
                         <label for="excel_file" class="form-label">Arquivo Excel</label>
                         <input type="file" class="form-control" id="excel_file" name="excel_file" accept=".xlsx" required>
                         <small class="text-muted">Colunas esperadas: ID, Nome, Turno, Projeto, Linha</small>
                     </div>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-cloud-arrow-up"></i> Processar Upload
+                    <button type="submit" class="btn btn-primary" id="analyzeBtn">
+                        <i class="bi bi-search"></i> Analisar Planilha
                     </button>
                 </form>
             </div>
@@ -68,4 +63,71 @@
         </div>
     </div>
 </div>
+
+<!-- Modal de Prévia do Upload -->
+<div class="modal fade" id="modalPreviewUpload" tabindex="-1" aria-labelledby="modalPreviewUploadLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title" id="modalPreviewUploadLabel"><i class="bi bi-clipboard-check"></i> Prévia da Importação</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-6">
+                        <div class="card border-0 bg-light h-100">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-1">Linhas na Planilha</h6>
+                                <span class="fs-4 fw-bold" id="pv_total_rows">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card border-0 bg-light h-100">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-1">📋 Total de Alocações</h6>
+                                <span class="fs-4 fw-bold" id="pv_allocations">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card border-0 bg-success bg-opacity-10 h-100">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-1">🟢 Novos Funcionários</h6>
+                                <span class="fs-4 fw-bold text-success" id="pv_new_employees">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card border-0 bg-primary bg-opacity-10 h-100">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-1">🔵 Funcionários a Atualizar</h6>
+                                <span class="fs-4 fw-bold text-primary" id="pv_existing_employees">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <h6 class="text-muted">🟡 Linhas Novas Detectadas</h6>
+                <ul class="list-unstyled mb-0" id="pv_new_lines">
+                    <li class="text-muted">Nenhuma linha nova detectada</li>
+                </ul>
+                <div id="matriculaWarningBox" class="alert alert-warning d-none mt-3 mb-0" role="alert">
+                    <h6 class="alert-heading"><i class="bi bi-exclamation-triangle-fill"></i> Conflitos de Matrícula Detectados</h6>
+                    <ul class="list-unstyled mb-1" id="pv_matricula_warnings"></ul>
+                    <small class="text-muted">Escolha migrar a matrícula para o valor da planilha ou ignorar a linha.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="cancelImportBtn">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="confirmImportBtn">
+                    <i class="bi bi-check-lg"></i> Confirmar e Importar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
 {% endblock %}
