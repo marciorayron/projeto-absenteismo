@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadFilterOptions();
 
     // Charts
-    let chartByLine, chartByProject, chartByShift, chartDailyTrend;
+    let chartByLine, chartByProject, chartByShift, chartDailyTrend, chartByDayOfWeek;
     let lineDataCache = [];
     let projectDataCache = [];
     let shiftDataCache = [];
@@ -364,6 +364,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const trendData = await trendRes.json();
             renderDailyTrend(trendData);
 
+            // Load Top Absentees ranking
+            const topRes = await fetch(`/dashboard/api/top-absentees?${queryString}`);
+            const topData = await topRes.json();
+            renderTopAbsentees(topData);
+
+            // Load absence by day of week
+            const dowRes = await fetch(`/dashboard/api/by-day-of-week?${queryString}`);
+            const dowData = await dowRes.json();
+            renderDayOfWeekChart(dowData);
+
             // Charts are re-created on fresh data load — reset trend toggles.
             document.querySelectorAll('.btn-toggle-trend').forEach(function(b) { b.classList.remove('active'); });
 
@@ -573,6 +583,71 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
+    }
+
+    function renderTopAbsentees(data) {
+        const tbody = document.getElementById('topAbsenteesBody');
+        if (!tbody) return;
+        const list = (data && data.top_absentees) || [];
+        if (list.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Nenhum registro de ausência no período.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = list.map(function (r, idx) {
+            const medal = idx < 3 ? ['🥇', '🥈', '🥉'][idx] : (idx + 1);
+            return `<tr>
+                <td>${medal} ${escapeHtml(r.name)}</td>
+                <td>${escapeHtml(r.line)}</td>
+                <td>${r.shift != null ? 'Turno ' + r.shift : '—'}</td>
+                <td>${r.occurrences}</td>
+                <td>${r.total_days_absent}</td>
+                <td><strong>${r.bradford_score}</strong></td>
+            </tr>`;
+        }).join('');
+    }
+
+    function renderDayOfWeekChart(data) {
+        const ctxEl = document.getElementById('chartByDayOfWeek');
+        if (!ctxEl) return;
+
+        const labels = data.days || [];
+        const counts = data.counts || [];
+
+        setEmptyState('chartByDayOfWeek', counts.reduce(function (a, b) { return a + b; }, 0) === 0);
+        if (chartByDayOfWeek) chartByDayOfWeek.destroy();
+        if (counts.reduce(function (a, b) { return a + b; }, 0) === 0) return;
+
+        chartByDayOfWeek = new Chart(ctxEl, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Ausências',
+                    data: counts,
+                    backgroundColor: [
+                        '#EF4444', '#3B82F6', '#10B981', '#F59E0B',
+                        '#8B5CF6', '#06B6D4', '#F97316'
+                    ],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: function (c) { return 'Ausências: ' + c.parsed.y; } } }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Quantidade' } }
+                }
+            }
+        });
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // ─── BRADFORD ───

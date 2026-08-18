@@ -14,6 +14,10 @@ _COLUMN_MIGRATIONS = {
     'employees': [
         ('vacation_start', 'DATE'),
         ('vacation_end', 'DATE'),
+        ('line_id', 'INTEGER'),
+        ('shift_id', 'INTEGER'),
+        ('project_id', 'INTEGER'),
+        ('is_active', 'BOOLEAN'),
     ],
     'attendances': [
         ('justification_type', 'VARCHAR(20)'),
@@ -24,6 +28,10 @@ _COLUMN_MIGRATIONS = {
     ],
     'lines': [
         ('is_active', 'BOOLEAN'),
+    ],
+    'transfer_requests': [
+        ('origin_line_id', 'INTEGER'),
+        ('origin_shift_id', 'INTEGER'),
     ],
 }
 
@@ -62,6 +70,21 @@ def ensure_schema():
         if 'is_active' in line_columns:
             db.session.execute(
                 text("UPDATE lines SET is_active = 1 WHERE is_active IS NULL")
+            )
+
+    # Backfill: employees' is_active flag derived from the legacy status column.
+    if 'employees' in existing_tables:
+        col_rows = db.session.execute(text('PRAGMA table_info(employees)')).fetchall()
+        emp_columns = {row[1] for row in col_rows}
+        if 'is_active' in emp_columns and 'status' in emp_columns:
+            db.session.execute(
+                text("UPDATE employees SET is_active = 1 WHERE is_active IS NULL AND status = 'ACTIVE'")
+            )
+            db.session.execute(
+                text("UPDATE employees SET is_active = 0 WHERE is_active IS NULL AND status != 'ACTIVE'")
+            )
+            db.session.execute(
+                text("UPDATE employees SET status = 'ACTIVE' WHERE status IS NULL OR status = ''")
             )
 
     db.session.commit()

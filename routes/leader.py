@@ -7,8 +7,11 @@ from models.allocation import Allocation
 from models.attendance import Attendance
 from models.audit_log import AuditLog
 from models.line_validation import LineValidation
+from models.leader_scope import LeaderScope
 from models.user import User
 from models.shift import Shift
+from models.line import Line
+from models.calendar import CompanyCalendar
 from services.metrics_service import calculate_lost_minutes, calculate_bradford_factor
 from datetime import date, datetime, time as dt_time, timedelta
 from collections import defaultdict
@@ -67,6 +70,22 @@ def _get_leader_line_shifts(managed_scopes):
     return result
 
 
+def _is_month_frozen(record_date):
+    """Return True if the record date is outside the current active month.
+
+    Past (and future) months are frozen for everyone except ADMIN users.
+    """
+    if record_date is None:
+        return False
+    today = date.today()
+    if record_date.month == today.month and record_date.year == today.year:
+        return False
+    return current_user.role != 'ADMIN'
+
+
+MONTH_FREEZE_MESSAGE = 'Registros de meses anteriores estão congelados. Contate um Administrador.'
+
+
 @leader_bp.route('/')
 @login_required
 def index():
@@ -87,6 +106,26 @@ def index():
     search = request.args.get('search', '').strip()
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 25, type=int)
+
+    # --- Leader auto-scope: pre-select assigned lines from LeaderScope ---
+    # When a Leader opens the operation screen without explicit filters, the
+    # view is automatically restricted to (and pre-selected with) their scope.
+    if current_user.role == 'LIDER' and current_user.managed_scopes:
+        leader_line_shifts = _get_leader_line_shifts(current_user.managed_scopes)
+    else:
+        leader_line_shifts = []
+    leader_has_scope = bool(leader_line_shifts)
+
+    no_explicit_filters = not (shift or project or line)
+    auto_scoped = False
+    if leader_has_scope and no_explicit_filters:
+        auto_scoped = True
+        scope_lines = sorted({ln for ln, _ in leader_line_shifts})
+        scope_shifts = sorted({sh for _, sh in leader_line_shifts})
+        if not shift:
+            shift = str(scope_shifts[0])
+        if not line:
+            line = scope_lines[0]
 
     # Get dynamic filter options
     shifts_rows = db.session.query(Allocation.shift).distinct().order_by(Allocation.shift).all()
@@ -112,6 +151,13 @@ def index():
         base_query = base_query.filter(Allocation.project == project)
     if line:
         base_query = base_query.filter(Allocation.line == line)
+
+    # Restrict results to the leader's assigned (line, shift) combos when auto-scoped
+    if auto_scoped:
+        base_query = base_query.filter(db.or_(*[
+            db.and_(Allocation.line == ln, Allocation.shift == sh)
+            for ln, sh in leader_line_shifts
+        ]))
 
     # Search filter directly in SQL (employee ID or name)
     if search:
@@ -216,6 +262,41 @@ def index():
         else:
             operation_audited = True  # nothing to audit
 
+    # Company calendar exception for the selected date (FERIADO / FOLGA_COMPENSADA / SABADO_LETIVO)
+    calendar_exception = None
+    calendar_entry = CompanyCalendar.query.filter_by(date=parsed_date).first()
+    if calendar_entry:
+        calendar_exception = {
+            'type': calendar_entry.type,
+            'description': calendar_entry.description
+        }
+
+    # Transfer request modal data (employees restricted to the leader's scope)
+    if current_user.role == 'LIDER':
+        scope_line_ids = {s.line_id for s in current_user.managed_scopes if s.line_id}
+        if scope_line_ids:
+            transfer_employees = Employee.query.filter(
+                Employee.is_active.is_(True),
+                Employee.line_id.in_(scope_line_ids)
+            ).order_by(Employee.name).all()
+        else:
+            transfer_employees = []
+    else:
+        scope_line_ids = set()
+        transfer_employees = Employee.query.filter_by(is_active=True).order_by(Employee.name).all()
+    transfer_lines = Line.query.filter_by(is_active=True).order_by(Line.project, Line.name).all()
+    transfer_shifts = Shift.query.filter_by(is_active=True).order_by(Shift.id).all()
+
+    # JSON blob consumed by transfers.js to drive the PUSH/PULL dynamic state.
+    transfer_all_employees = Employee.query.filter_by(is_active=True).order_by(Employee.name).all()
+    transfer_data = {
+        'scopeEmployees': [{'id': e.id, 'name': e.name} for e in transfer_employees],
+        'allEmployees': [{'id': e.id, 'name': e.name} for e in transfer_all_employees],
+        'lines': [{'id': l.id, 'project': l.project, 'name': l.name} for l in transfer_lines],
+        'scopeLineIds': sorted(scope_line_ids),
+        'isStaff': current_user.role in ('ADMIN', 'SUPERVISOR'),
+    }
+
     return render_template(
         'leader/index.html',
         employee_list=employee_list,
@@ -236,7 +317,15 @@ def index():
         shift_schedules=shift_schedules,
         closed_shift_ids=closed_shift_ids,
         managed_scope_count=managed_scope_count,
-        operation_audited=operation_audited
+        operation_audited=operation_audited,
+        leader_has_scope=leader_has_scope,
+        auto_scoped=auto_scoped,
+        editing_locked=_is_month_frozen(parsed_date),
+        calendar_exception=calendar_exception,
+        transfer_employees=transfer_employees,
+        transfer_lines=transfer_lines,
+        transfer_shifts=transfer_shifts,
+        transfer_data=transfer_data,
     )
 
 
@@ -244,7 +333,7 @@ def index():
 @login_required
 def register():
     """Register attendance for an employee (legacy form-based)."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         flash('Permissão negada.', 'danger')
         return redirect(url_for('leader.index'))
 
@@ -285,6 +374,11 @@ def register():
             pass
 
     parsed_date = datetime.strptime(record_date, '%Y-%m-%d').date()
+
+    # Monthly edit freeze: non-ADMIN roles cannot edit records outside the current month
+    if _is_month_frozen(parsed_date):
+        flash(MONTH_FREEZE_MESSAGE, 'danger')
+        return redirect(url_for('leader.index', date=record_date))
 
     # Off-day lock: prevent absence/delay/early-exit registrations on non-working days
     if event_type in ('FULL_ABSENCE', 'LATE_ARRIVAL', 'EARLY_EXIT') and _is_off_day(alloc.shift, parsed_date):
@@ -363,7 +457,7 @@ def register():
 @login_required
 def api_quick_action():
     """AJAX endpoint for inline quick actions (absence, vacation, present, delay, exit)."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         return jsonify({'success': False, 'error': 'Permissão negada.'}), 403
 
     data = request.get_json()
@@ -415,6 +509,10 @@ def api_quick_action():
         record_date = datetime.strptime(record_date_str, '%Y-%m-%d').date()
     except ValueError:
         return jsonify({'success': False, 'error': 'Data inválida.'}), 400
+
+    # Monthly edit freeze: non-ADMIN roles cannot edit records outside the current month
+    if _is_month_frozen(record_date):
+        return jsonify({'success': False, 'error': MONTH_FREEZE_MESSAGE}), 403
 
     # Off-day lock: prevent absence/delay/early-exit registrations on non-working days
     if event_type in ('FULL_ABSENCE', 'LATE_ARRIVAL', 'EARLY_EXIT') and _is_off_day(alloc.shift, record_date):
@@ -491,7 +589,7 @@ def api_quick_action():
 @login_required
 def api_reset_attendance():
     """Delete attendance record (reset to unregistered)."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         return jsonify({'success': False, 'error': 'Permissão negada.'}), 403
 
     data = request.get_json()
@@ -505,6 +603,10 @@ def api_reset_attendance():
         record_date = datetime.strptime(record_date_str, '%Y-%m-%d').date()
     except ValueError:
         return jsonify({'success': False, 'error': 'Data inválida.'}), 400
+
+    # Monthly edit freeze: non-ADMIN roles cannot edit records outside the current month
+    if _is_month_frozen(record_date):
+        return jsonify({'success': False, 'error': MONTH_FREEZE_MESSAGE}), 403
 
     existing = Attendance.query.filter_by(
         employee_id=employee_id,
@@ -525,7 +627,7 @@ def api_reset_attendance():
 @login_required
 def api_set_vacation():
     """Set or clear an employee's vacation period (date range)."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         return jsonify({'success': False, 'error': 'Permissão negada.'}), 403
 
     data = request.get_json()
@@ -579,7 +681,7 @@ def api_set_vacation():
 @login_required
 def api_validate_line():
     """Validate/finalize a line for the day."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         return jsonify({'success': False, 'error': 'Permissão negada.'}), 403
 
     data = request.get_json()
@@ -626,7 +728,7 @@ def api_validate_line():
 @login_required
 def api_audit_operation():
     """Audit all lines assigned to the current leader for a date in a single action."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         return jsonify({'success': False, 'error': 'Permissão negada.'}), 403
 
     data = request.get_json() or {}
@@ -709,9 +811,28 @@ def api_employees():
     return jsonify({'employees': result})
 
 
-@leader_bp.route('/api/attendance/<employee_id>/<record_date>', methods=['GET'])
+@leader_bp.route('/api/employees/scope', methods=['GET'])
 @login_required
-def get_attendance(employee_id, record_date):
+def api_employees_scope():
+    """JSON API returning the active employees in the current user's LeaderScope.
+
+    Used by the transfer modal to populate/populate the employee dropdown.
+    For ADMIN/SUPERVISOR the full set of active employees is returned.
+    """
+    if current_user.role == 'LIDER':
+        scope_line_ids = {s.line_id for s in current_user.managed_scopes if s.line_id}
+        if scope_line_ids:
+            query = Employee.query.filter(
+                Employee.is_active.is_(True),
+                Employee.line_id.in_(scope_line_ids)
+            ).order_by(Employee.name)
+        else:
+            query = Employee.query.filter(db.false())
+    else:
+        query = Employee.query.filter_by(is_active=True).order_by(Employee.name)
+
+    result = [{'employee_id': e.id, 'name': e.name} for e in query.all()]
+    return jsonify({'employees': result})
     """Get existing attendance record for an employee on a specific date."""
     try:
         parsed_date = datetime.strptime(record_date, '%Y-%m-%d').date()
@@ -798,7 +919,7 @@ def api_employee_quick_history(employee_id):
 @login_required
 def employee_history(employee_id):
     """Dedicated employee absence history and analytics page."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         flash('Permissão negada.', 'danger')
         return redirect(url_for('leader.index'))
 
@@ -822,7 +943,7 @@ def employee_history(employee_id):
 @login_required
 def api_employee_history_data(employee_id):
     """Return filtered absence data for charts and table."""
-    if current_user.role not in ['LIDER', 'ADMIN']:
+    if current_user.role not in ['LIDER', 'SUPERVISOR', 'ADMIN']:
         return jsonify({'error': 'Permissão negada.'}), 403
 
     emp = Employee.query.get(employee_id)

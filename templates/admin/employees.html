@@ -10,93 +10,220 @@
     </a>
 </div>
 
-<div class="card shadow">
+<!-- Create employee -->
+<div class="card shadow mb-4">
+    <div class="card-header">
+        <h6 class="mb-0"><i class="bi bi-person-plus"></i> Novo Funcionário</h6>
+    </div>
     <div class="card-body">
-        <form method="GET" action="{{ url_for('admin.employees') }}" class="row g-2 mb-3">
-            <div class="col-md-8">
-                <input type="text" class="form-control" name="search" value="{{ search }}" placeholder="Buscar por ID ou nome...">
+        <form method="POST" action="{{ url_for('admin.employee_create') }}" class="row g-2">
+            <div class="col-md-2">
+                <label class="form-label">Matrícula</label>
+                <input type="text" class="form-control" name="id" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Nome</label>
+                <input type="text" class="form-control" name="name" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Linha</label>
+                <select class="form-select" name="line_id" required>
+                    <option value="">Selecione...</option>
+                    {% for l in lines %}
+                    <option value="{{ l.id }}">{{ l.project }} - {{ l.name }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-md-2">
-                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search"></i> Buscar</button>
+                <label class="form-label">Turno</label>
+                <select class="form-select" name="shift_id" required>
+                    <option value="">Selecione...</option>
+                    {% for s in shifts %}
+                    <option value="{{ s.id }}">{{ s.name }}</option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="col-md-2">
-                <a href="{{ url_for('admin.employees') }}" class="btn btn-outline-secondary w-100">Limpar</a>
+            <div class="col-md-1 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-check-lg"></i></button>
             </div>
         </form>
+    </div>
+</div>
 
-        <div class="table-responsive">
-            <table class="table table-striped table-hover align-middle">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Nome</th>
-                        <th>Status</th>
-                        <th style="min-width: 360px;">Período de Férias</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for emp in pagination.items %}
-                    <tr>
-                        <td>{{ emp.id }}</td>
-                        <td>{{ emp.name }}</td>
-                        <td>
-                            {% if emp.status == 'ACTIVE' %}
-                            <span class="badge bg-success">Ativo</span>
-                            {% else %}
-                            <span class="badge bg-secondary">{{ emp.status }}</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <form method="POST" action="{{ url_for('admin.employee_vacation', employee_id=emp.id) }}" class="d-flex align-items-center gap-2 flex-wrap">
-                                <input type="date" class="form-control form-control-sm" name="vacation_start" value="{{ emp.vacation_start.isoformat() if emp.vacation_start else '' }}" style="max-width: 150px;">
-                                <span class="text-muted">até</span>
-                                <input type="date" class="form-control form-control-sm" name="vacation_end" value="{{ emp.vacation_end.isoformat() if emp.vacation_end else '' }}" style="max-width: 150px;">
-                                <button type="submit" class="btn btn-sm btn-primary">Salvar</button>
-                            </form>
-                            <small class="text-muted">Deixe as duas datas vazias para remover as férias.</small>
-                        </td>
-                        <td>
-                            <button type="button" class="btn btn-sm btn-outline-warning btn-change-id"
-                                    data-employee-id="{{ emp.id }}"
-                                    data-employee-name="{{ emp.name }}">
-                                <i class="bi bi-arrow-left-right"></i> Alterar Matrícula
-                            </button>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="5" class="text-center text-muted py-4">Nenhum funcionário encontrado.</td>
-                    </tr>
+<!-- Filters -->
+<div class="card shadow mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('admin.employees') }}" class="row g-2">
+            <div class="col-md-4">
+                <input type="text" class="form-control" name="search" value="{{ search }}" placeholder="Buscar por ID ou nome...">
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" name="line">
+                    <option value="">Todas as linhas</option>
+                    {% for l in lines %}
+                    <option value="{{ l.id }}" {% if line_filter == l.id|string %}selected{% endif %}>{{ l.project }} - {{ l.name }}</option>
                     {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" name="shift">
+                    <option value="">Todos os turnos</option>
+                    {% for s in shifts %}
+                    <option value="{{ s.id }}" {% if shift_filter == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-1">
+                <select class="form-select" name="status">
+                    <option value="">Todos</option>
+                    <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Ativos</option>
+                    <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inativos</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-primary flex-fill"><i class="bi bi-search"></i></button>
+                <a href="{{ url_for('admin.employees') }}" class="btn btn-outline-secondary flex-fill">Limpar</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow">
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nome</th>
+                    <th>Linha</th>
+                    <th>Turno</th>
+                    <th>Projeto</th>
+                    <th>Status</th>
+                    <th style="min-width: 300px;">Férias</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for emp in pagination.items %}
+                <tr>
+                    <td>{{ emp.id }}</td>
+                    <td>{{ emp.name }}</td>
+                    <td>{{ emp.line.name if emp.line else '—' }}</td>
+                    <td>{% if emp.shift %}<span class="badge bg-secondary">Turno {{ emp.shift.id }}</span>{% else %}—{% endif %}</td>
+                    <td>{{ emp.project_name or '—' }}</td>
+                    <td>
+                        {% if emp.is_active %}
+                        <span class="badge bg-success">Ativo</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Inativo</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ url_for('admin.employee_vacation', employee_id=emp.id) }}" class="d-flex align-items-center gap-2 flex-wrap">
+                            <input type="date" class="form-control form-control-sm" name="vacation_start" value="{{ emp.vacation_start.isoformat() if emp.vacation_start else '' }}" style="max-width: 140px;">
+                            <span class="text-muted">até</span>
+                            <input type="date" class="form-control form-control-sm" name="vacation_end" value="{{ emp.vacation_end.isoformat() if emp.vacation_end else '' }}" style="max-width: 140px;">
+                            <button type="submit" class="btn btn-sm btn-primary">Salvar</button>
+                        </form>
+                    </td>
+                    <td>
+                        <div class="d-flex gap-1 flex-wrap">
+                            <button type="button" class="btn btn-sm btn-outline-primary btn-edit-emp"
+                                    data-employee-id="{{ emp.id }}"
+                                    data-employee-name="{{ emp.name }}"
+                                    data-line-id="{{ emp.line_id or '' }}"
+                                    data-shift-id="{{ emp.shift_id or '' }}"
+                                    data-is-active="{{ 'true' if emp.is_active else 'false' }}"
+                                    title="Editar">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <form method="POST" action="{{ url_for('admin.employee_toggle_status', employee_id=emp.id) }}" class="d-inline" onsubmit="return confirm('Alterar o status deste funcionário?');">
+                                <button type="submit" class="btn btn-sm {{ 'btn-outline-danger' if emp.is_active else 'btn-outline-success' }}" title="{{ 'Inativar' if emp.is_active else 'Reativar' }}">
+                                    <i class="bi {{ 'bi-person-x' if emp.is_active else 'bi-person-check' }}"></i>
+                                </button>
+                            </form>
+                            <button type="button" class="btn btn-sm btn-outline-warning btn-change-id"
+                                    data-employee-id="{{ emp.id }}" data-employee-name="{{ emp.name }}" title="Alterar Matrícula">
+                                <i class="bi bi-arrow-left-right"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">Nenhum funcionário encontrado.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
 
         {% if pagination.pages > 1 %}
         <nav class="d-flex justify-content-center">
             <ul class="pagination pagination-sm mb-0">
                 <li class="page-item {{ 'disabled' if not pagination.has_prev else '' }}">
-                    <a class="page-link" href="{{ url_for('admin.employees', search=search, page=pagination.prev_num) if pagination.has_prev else '#' }}">&laquo;</a>
+                    <a class="page-link" href="{{ url_for('admin.employees', search=search, line=line_filter, shift=shift_filter, status=status_filter, page=pagination.prev_num) if pagination.has_prev else '#' }}">&laquo;</a>
                 </li>
                 {% for p in pagination.iter_pages() %}
                     {% if p %}
                     <li class="page-item {{ 'active' if p == pagination.page else '' }}">
-                        <a class="page-link" href="{{ url_for('admin.employees', search=search, page=p) }}">{{ p }}</a>
+                        <a class="page-link" href="{{ url_for('admin.employees', search=search, line=line_filter, shift=shift_filter, status=status_filter, page=p) }}">{{ p }}</a>
                     </li>
                     {% else %}
                     <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
                     {% endif %}
                 {% endfor %}
                 <li class="page-item {{ 'disabled' if not pagination.has_next else '' }}">
-                    <a class="page-link" href="{{ url_for('admin.employees', search=search, page=pagination.next_num) if pagination.has_next else '#' }}">&raquo;</a>
+                    <a class="page-link" href="{{ url_for('admin.employees', search=search, line=line_filter, shift=shift_filter, status=status_filter, page=pagination.next_num) if pagination.has_next else '#' }}">&raquo;</a>
                 </li>
             </ul>
         </nav>
         {% endif %}
     </div>
 </div>
-{% endblock %}
+
+<!-- Modal Editar Funcionário -->
+<div class="modal fade" id="modalEditEmployee" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" id="editEmployeeForm" action="">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-pencil"></i> Editar Funcionário</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3"><strong id="editEmployeeName"></strong></p>
+                    <input type="hidden" name="id" id="editEmployeeId">
+                    <div class="mb-3">
+                        <label class="form-label">Nome</label>
+                        <input type="text" class="form-control" name="name" id="editName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Linha</label>
+                        <select class="form-select" name="line_id" id="editLine">
+                            {% for l in lines %}
+                            <option value="{{ l.id }}">{{ l.project }} - {{ l.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Turno</label>
+                        <select class="form-select" name="shift_id" id="editShift">
+                            {% for s in shifts %}
+                            <option value="{{ s.id }}">{{ s.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="is_active" id="editIsActive" checked>
+                        <label class="form-check-label" for="editIsActive">Funcionário Ativo</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <!-- Modal Alterar Matrícula -->
 <div class="modal fade" id="modalChangeEmployeeId" tabindex="-1" aria-hidden="true">
@@ -105,7 +232,7 @@
             <form method="POST" id="migrateIdForm" action="">
                 <div class="modal-header bg-dark text-white">
                     <h5 class="modal-title"><i class="bi bi-arrow-left-right"></i> Alterar Matrícula</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-3">Alterar a matrícula de <strong id="migrateEmployeeName"></strong>.</p>
@@ -121,10 +248,42 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    // Edit employee modal
+    const editModalEl = document.getElementById('modalEditEmployee');
+    const editForm = document.getElementById('editEmployeeForm');
+    const editNameEl = document.getElementById('editName');
+    const editNameSpan = document.getElementById('editEmployeeName');
+    const editIdInput = document.getElementById('editEmployeeId');
+    const editLine = document.getElementById('editLine');
+    const editShift = document.getElementById('editShift');
+    const editIsActive = document.getElementById('editIsActive');
+
+    document.querySelectorAll('.btn-edit-emp').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const empId = btn.getAttribute('data-employee-id');
+            const empName = btn.getAttribute('data-employee-name');
+            const lineId = btn.getAttribute('data-line-id');
+            const shiftId = btn.getAttribute('data-shift-id');
+            const isActive = btn.getAttribute('data-is-active') === 'true';
+            const search = new URLSearchParams(window.location.search).get('search') || '';
+            editForm.action = '/admin/employees/' + encodeURIComponent(empId) + '/edit' +
+                (search ? '?search=' + encodeURIComponent(search) : '');
+            editNameSpan.textContent = empName + ' (matrícula: ' + empId + ')';
+            editIdInput.value = empId;
+            editNameEl.value = empName;
+            editLine.value = lineId;
+            editShift.value = shiftId;
+            editIsActive.checked = isActive;
+            bootstrap.Modal.getOrCreateInstance(editModalEl).show();
+        });
+    });
+
+    // Change employee id (matrícula) modal
     const modalEl = document.getElementById('modalChangeEmployeeId');
     const form = document.getElementById('migrateIdForm');
     const nameSpan = document.getElementById('migrateEmployeeName');
@@ -147,3 +306,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 {% endblock %}
+

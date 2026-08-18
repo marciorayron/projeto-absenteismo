@@ -10,6 +10,8 @@ Aplicação web para registro de presença, monitoramento de absenteísmo e audi
 - **Tendência Diária**: Gráfico de ausências e minutos perdidos ao longo do período com uma única consulta `GROUP BY record_date`
 - **Filtros dinâmicos cascatados**: Turno → Projeto → Linha com carregamento assíncrono via `/api/cascade-options`
 - **Exportação Excel (.xlsx)**: Relatórios multi-aba (Indicadores, Por Linha, Registros Detalhados) via `pandas` + `openpyxl`
+- **🏆 Top Colaboradores Ausentes**: Ranking com dias de ausência, ocorrências e Score Bradford (`/dashboard/api/top-absentees`)
+- **Ausências por Dia da Semana**: Gráfico de barras com a distribuição semanal (`/dashboard/api/by-day-of-week`)
 
 ### 🧮 Fator Bradford (Window Functions SQL)
 - Cálculo em **lote** de todos os funcionários ativos usando `LAG()` window function do SQLite
@@ -41,6 +43,23 @@ Aplicação web para registro de presença, monitoramento de absenteísmo e audi
   - Status traduzidos (ex: `FULL_ABSENCE` → "Falta Integral")
   - Cores: vermelho no Antes, verde no Depois para alterações
 
+### 🗓️ Calendário da Empresa (Feriados)
+- Gestão de feriados nacionais, estaduais (SC) e municipais (Navegantes) em `/admin/calendar` (`models/calendar.py`)
+- Pré-população automática via `holidays` + manual: **02/02** (Nossa Senhora dos Navegantes) e **26/08** (Emancipação de Navegantes)
+- Dias marcados como `FERIADO`/`FOLGA_COMPENSADA` são **ignorados nas métricas de absenteísmo**
+- Botão "🔄 Recarregar Feriados Nacionais/Locais" e idempotência garantida (`services/calendar_service.py`)
+
+### 🔄 Transferências de Linha (Multi-Líder)
+- Fluxo **PUSH** (enviar) e **PULL** (receber) com modal na tela de Operação
+- Validação de escopo por `LeaderScope` (líderes só agem nas suas linhas); `ADMIN`/`SUPERVISOR` têm bypass e **auto-aprovação imediata**
+- Fluxo de aprovação: líder dono da linha de origem (PULL) / destino (PUSH); requisições `PENDING` com aprovação/rejeição/cancelamento
+- Badge de pendentes na navbar, log de movimentação (`EmployeeMovementLog`) e relatório exportável em `/reports/transfers`
+- Ao aprovar, atualiza `Employee.line_id/shift_id` e a `Allocation` ativa (`routes/transfer.py`, `models/transfer.py`)
+
+### 👥 Gestão de Funcionários (CRUD)
+- CRUD completo em `/admin/employees` (criar, editar linha/turno/status, inativar via soft-delete preservando histórico)
+- Papel **`SUPERVISOR`**: acesso administrativo (upload, linhas, turnos, calendário, relatórios) com card de Banco de Dados bloqueado (exclusivo `ADMIN`)
+
 ### ⚡ Otimização de Performance
 - **Todas as agregações e filtros delegados ao SQLite** — zero loops Python para cálculo de métricas
 - Índices compostos em `attendances` (`record_date + event_type`, `employee_id + record_date`) e `allocations` (`shift + line + end_date`)
@@ -57,6 +76,7 @@ Aplicação web para registro de presença, monitoramento de absenteísmo e audi
 | **Autenticação** | Flask-Login, Flask-Bcrypt (senhas hash) |
 | **Frontend** | Bootstrap 5, Chart.js, Vanilla JavaScript ES6 |
 | **Exportação** | pandas, openpyxl (.xlsx) |
+| **Calendário/Feriados** | holidays (nacionais, SC e municipais) |
 | **Servidor WSGI** | Waitress (produção) |
 
 ## Estrutura do Projeto
@@ -67,35 +87,42 @@ projeto_absenteismo/
 ├── config.py                # Configurações (SQLite URI, secret key, tolerâncias)
 ├── extensions.py            # db, login_manager, bcrypt
 ├── requirements.txt         # Dependências
-├── seed.py                  # Criação de usuários iniciais (admin/lider)
+├── seed.py                  # Criação de usuários iniciais (admin/lider/supervisor)
 ├── models/
-│   ├── employee.py          # Modelo Employee
+│   ├── employee.py          # Modelo Employee (linha/turno/projeto/status)
 │   ├── allocation.py        # Alocações (turno, projeto, linha) com índices compostos
 │   ├── attendance.py        # Registros de presença com índices compostos
-│   ├── user.py              # Usuários do sistema
+│   ├── user.py              # Usuários do sistema (LIDER/SUPERVISOR/ADMIN)
 │   ├── shift.py             # Definições de turno
+│   ├── line.py              # Linhas e projetos
 │   ├── audit_log.py         # Logs de auditoria (JSON old/new)
+│   ├── calendar.py          # Calendário da empresa (FERIADO/FOLGA_COMPENSADA/SABADO_LETIVO)
+│   ├── transfer.py          # TransferRequests e EmployeeMovementLog
 │   └── line_validation.py   # Validação de linha por dia
 ├── routes/
 │   ├── auth.py              # Login/logout
 │   ├── leader.py            # Tela de operação (registro de presença)
 │   ├── dashboard.py         # APIs do dashboard (agregações SQL)
-│   ├── admin.py             # Painel admin, upload, usuários, auditoria
-│   └── reports.py           # Relatórios de ausências + exportação
+│   ├── admin.py             # Painel admin, upload, usuários, CRUD, calendário
+│   ├── transfer.py          # Fluxo de transferências (PUSH/PULL, aprovação)
+│   └── reports.py           # Relatórios de ausências + transferências + exportação
 ├── services/
 │   ├── metrics_service.py   # Cálculo de minutos perdidos, Bradford Factor (SQL LAG)
+│   ├── calendar_service.py  # Pré-população de feriados oficiais
 │   └── excel_service.py     # Processamento de upload, exportação Excel
 ├── static/js/
 │   ├── filters.js           # Utilitário compartilhado: cascade, clear, debounce
 │   ├── dashboard.js         # Gráficos Chart.js + carregamento AJAX
-│   └── leader.js            # Auto-fill de horários nos modais
+│   ├── leader.js            # Auto-fill de horários nos modais
+│   └── transfers.js         # Modal de transferência (PUSH/PULL dinâmico)
 └── templates/
-    ├── base.html            # Layout base com navbar
+    ├── base.html            # Layout base com navbar + badge de pendências
     ├── login.html
     ├── employee_history.html
-    ├── admin/               # Dashboard, upload, usuários, shifts, auditoria
+    ├── admin/               # Dashboard, upload, usuários, shifts, calendar, CRUD
     ├── leader/              # Registro de presença (index)
-    └── reports/             # Consulta de ausências
+    ├── transfers/           # Revisão/aprovação de transferências
+    └── reports/             # Consulta de ausências + histórico de transferências
 ```
 
 ## Instalação e Execução
@@ -134,6 +161,7 @@ A aplicação estará disponível em `http://localhost:5000`.
 | Usuário | Senha | Papel |
 |---|---|---|
 | `admin` | `admin123` | ADMIN — acesso total |
+| `supervisor` | `supervisor123` | SUPERVISOR — administrativo (sem gestão de banco) |
 | `lider` | `lider123` | LIDER — registro de presença e dashboard |
 
 > As senhas são criadas automaticamente na primeira execução via `seed.py`. Altere-as após o primeiro login.

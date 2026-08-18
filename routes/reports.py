@@ -6,9 +6,12 @@ from sqlalchemy import func, case
 from models.employee import Employee
 from models.allocation import Allocation
 from models.attendance import Attendance
+from models.line import Line
+from models.transfer import EmployeeMovementLog
 from services.excel_service import export_absence_report
 from datetime import date, datetime, timedelta
 import io
+import pandas as pd
 
 reports_bp = Blueprint('reports', __name__, url_prefix='/reports')
 
@@ -215,4 +218,96 @@ def export_excel():
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True,
         download_name=f'relatorio_ausencias_{start.isoformat()}_a_{end.isoformat()}.xlsx'
+    )
+
+
+def _movement_filter_query():
+    """Build the filtered EmployeeMovementLog query from request args."""
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+    origin_line = request.args.get('origin_line', '').strip()
+    target_line = request.args.get('target_line', '').strip()
+    employee = request.args.get('employee', '').strip()
+
+    query = db.session.query(EmployeeMovementLog)
+    if date_from:
+        try:
+            start = datetime.strptime(date_from, '%Y-%m-%d')
+            query = query.filter(EmployeeMovementLog.timestamp >= start)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1) - timedelta(seconds=1)
+            query = query.filter(EmployeeMovementLog.timestamp <= end)
+        except ValueError:
+            pass
+    if origin_line:
+        try:
+            query = query.filter(EmployeeMovementLog.origin_line_id == int(origin_line))
+        except ValueError:
+            pass
+    if target_line:
+        try:
+            query = query.filter(EmployeeMovementLog.target_line_id == int(target_line))
+        except ValueError:
+            pass
+    if employee:
+        query = query.filter(EmployeeMovementLog.employee_id == employee)
+
+    return query.order_by(EmployeeMovementLog.timestamp.desc())
+
+
+@reports_bp.route('/transfers')
+@login_required
+def transfers():
+    """Movement history report from EmployeeMovementLog with filters."""
+    lines = Line.query.filter_by(is_active=True).order_by(Line.project, Line.name).all()
+    query = _movement_filter_query()
+    logs = query.all()
+
+    return render_template(
+        'reports/transfers.html',
+        logs=logs,
+        lines=lines,
+        date_from=request.args.get('date_from', ''),
+        date_to=request.args.get('date_to', ''),
+        origin_line=request.args.get('origin_line', ''),
+        target_line=request.args.get('target_line', ''),
+        employee=request.args.get('employee', ''),
+    )
+
+
+@reports_bp.route('/transfers/export')
+@login_required
+def transfers_export():
+    """Export the movement history to Excel (.xlsx)."""
+    query = _movement_filter_query()
+    logs = query.all()
+
+    rows = []
+    for log in logs:
+        rows.append({
+            'Data': log.timestamp.strftime('%d/%m/%Y %H:%M') if log.timestamp else '',
+            'ID Funcionário': log.employee_id,
+            'Nome': log.employee.name if log.employee else '',
+            'Linha Origem': log.origin_line.name if log.origin_line else '—',
+            'Turno Origem': log.origin_shift_id,
+            'Linha Destino': log.target_line.name if log.target_line else '',
+            'Projeto Destino': log.target_line.project if log.target_line else '',
+            'Turno Destino': log.target_shift_id,
+            'Aprovado por': log.approved_by.username if log.approved_by else '',
+        })
+
+    df = pd.DataFrame(rows)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Movimentações', index=False)
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name='historico_movimentacoes.xlsx'
     )

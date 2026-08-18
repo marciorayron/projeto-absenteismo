@@ -20,8 +20,27 @@
         <a href="{{ url_for('dashboard.index') }}" class="btn btn-outline-primary">
             <i class="bi bi-bar-chart"></i> Dashboard
         </a>
+        <button type="button" class="btn btn-outline-secondary" id="transferModalOpen">
+            <i class="bi bi-arrow-left-right"></i> Solicitar Transferência
+        </button>
     </div>
 </div>
+
+{% if current_user.role == 'LIDER' and not leader_has_scope %}
+<div class="alert alert-info alert-dismissible fade show" role="alert">
+    <i class="bi bi-info-circle"></i>
+    Nenhuma linha foi atribuída ao seu escopo. Contate um administrador para configurar suas linhas de atuação.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+{% if editing_locked %}
+<div class="alert alert-warning alert-dismissible fade show" role="alert">
+    <i class="bi bi-lock-fill"></i>
+    Edição bloqueada: registros de meses anteriores estão congelados. Apenas administradores podem alterá-los.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 
 <!-- Filters -->
 <div class="card mb-4">
@@ -84,6 +103,13 @@
     </div>
 </div>
 
+{% if calendar_exception and calendar_exception.type in ['FERIADO', 'FOLGA_COMPENSADA'] %}
+<div class="alert alert-info">
+    <strong>📅 Dia Não Letivo / Exceção:</strong> {{ calendar_exception.description or calendar_exception.type }}
+    — Os lançamentos nesta data são desconsiderados nas métricas de absenteísmo.
+</div>
+{% endif %}
+
 <!-- Employee table -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -100,7 +126,7 @@
                     <th>Projeto</th>
                     <th>Linha</th>
                     <th style="width: 130px;">Status</th>
-                    <th style="width: 280px;">Ações</th>
+                    <th class="text-center" style="width: 360px;">Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -140,7 +166,9 @@
                             {% endif %}
                             <br><small class="text-muted">{{ item.attendance.minutes_lost }} min perdidos</small>
                         {% else %}
-                            {% if item.on_vacation %}
+                            {% if calendar_exception and calendar_exception.type in ['FERIADO', 'FOLGA_COMPENSADA'] %}
+                            <span class="badge bg-info">{{ 'Feriado' if calendar_exception.type == 'FERIADO' else 'Folga' }}</span>
+                            {% elif item.on_vacation %}
                             <span class="badge bg-warning text-dark">Férias</span>
                             {% elif item.is_off_day %}
                             <span class="badge bg-secondary">Folga</span>
@@ -149,31 +177,47 @@
                             {% endif %}
                         {% endif %}
                     </td>
-                    <td class="action-cell">
-                        {% if is_closed and current_user.role == 'LIDER' %}
-                        <span class="badge bg-secondary" title="Turno encerrado. Alterações requerem perfil ADMIN." style="font-size: 0.8rem;">🔒 Turno Encerrado</span>
-                        {% else %}
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button class="btn btn-danger quick-action-btn" data-event-type="FULL_ABSENCE" title="Falta" {% if locked or off_day %}disabled{% endif %}>
-                                ❌
-                            </button>
-                            <button class="btn btn-warning quick-action-btn" data-event-type="VACATION" title="Férias">
-                                🏖️
-                            </button>
-                            <button class="btn btn-outline-warning quick-action-btn" data-event-type="LATE_ARRIVAL" data-needs-time="check_in" title="Atraso (informar horário)" {% if locked or off_day %}disabled{% endif %}>
-                                ⏰
-                            </button>
-                            <button class="btn btn-outline-info quick-action-btn" data-event-type="EARLY_EXIT" data-needs-time="both" title="Saída Antecipada (informar horários)" {% if locked or off_day %}disabled{% endif %}>
-                                🚪
-                            </button>
-                            <button class="btn btn-success quick-action-btn" data-event-type="PRESENT" title="Presente / Reset">
-                                🟢
-                            </button>
+                    <td class="action-cell px-3 py-2" style="min-width: 340px;">
+                        <div class="d-flex align-items-center gap-2">
+                            <!-- Seção 1: Ações da Operação / Presença -->
+                            <div class="d-inline-flex align-items-center rounded bg-light border p-1 shadow-sm gap-1" role="group" aria-label="Ações da Operação">
+                                {% if is_closed and current_user.role == 'LIDER' %}
+                                <span class="badge bg-secondary" title="Turno encerrado. Alterações requerem perfil ADMIN." style="font-size: 0.8rem;">🔒 Turno Encerrado</span>
+                                {% else %}
+                                <button class="btn btn-danger btn-sm quick-action-btn" data-event-type="FULL_ABSENCE" title="Falta" {% if locked or off_day or editing_locked %}disabled{% endif %}>
+                                    ❌
+                                </button>
+                                <button class="btn btn-warning btn-sm quick-action-btn" data-event-type="VACATION" title="Férias" {% if editing_locked %}disabled{% endif %}>
+                                    🏖️
+                                </button>
+                                <button class="btn btn-outline-warning btn-sm quick-action-btn" data-event-type="LATE_ARRIVAL" data-needs-time="check_in" title="Atraso (informar horário)" {% if locked or off_day or editing_locked %}disabled{% endif %}>
+                                    ⏰
+                                </button>
+                                <button class="btn btn-outline-info btn-sm quick-action-btn" data-event-type="EARLY_EXIT" data-needs-time="both" title="Saída Antecipada (informar horários)" {% if locked or off_day or editing_locked %}disabled{% endif %}>
+                                    🚪
+                                </button>
+                                <button class="btn btn-success btn-sm quick-action-btn" data-event-type="PRESENT" title="Presente / Reset" {% if editing_locked %}disabled{% endif %}>
+                                    🟢
+                                </button>
+                                {% endif %}
+                            </div>
+
+                            <!-- Divisor vertical -->
+                            <div class="vr"></div>
+
+                            <!-- Seção 2: Histórico e Transferência -->
+                            <div class="d-inline-flex align-items-center gap-1">
+                                <button class="btn btn-outline-secondary btn-sm history-btn" title="Histórico de Ausências">
+                                    📄
+                                </button>
+                                <button type="button" class="btn btn-outline-info btn-sm open-transfer-modal" title="Solicitar Transferência"
+                                        data-employee-id="{{ item.employee.id }}"
+                                        data-employee-name="{{ item.employee.name }}"
+                                        data-employee-line="{{ item.employee.line_id or '' }}">
+                                    🔄
+                                </button>
+                            </div>
                         </div>
-                        {% endif %}
-                        <button class="btn btn-outline-secondary btn-sm ms-1 history-btn" title="Histórico de Ausências">
-                            📄
-                        </button>
                     </td>
                 </tr>
                 {% else %}
@@ -387,8 +431,75 @@
         </div>
     </div>
 </div>
-{% endblock %}
+<!-- Transfer Request Modal -->
+<div class="modal fade" id="transferModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="transferForm">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="bi bi-arrow-left-right"></i> Solicitar Transferência</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Tipo</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="request_type" id="tfTypeSend" value="PUSH" checked>
+                            <label class="form-check-label" for="tfTypeSend">Enviar colaborador</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="request_type" id="tfTypeReceive" value="PULL">
+                            <label class="form-check-label" for="tfTypeReceive">Receber colaborador</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Funcionário</label>
+                        <select class="form-select" name="employee_id" id="tfEmployee" required>
+                            <option value="">Selecione...</option>
+                            {% for e in transfer_employees %}
+                            <option value="{{ e.id }}">{{ e.name }} ({{ e.id }})</option>
+                            {% endfor %}
+                        </select>
+                        <div id="tfEmployeeHint" class="form-text text-info"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Linha de Destino</label>
+                        <select class="form-select" name="target_line_id" required>
+                            <option value="">Selecione...</option>
+                            {% for l in transfer_lines %}
+                            <option value="{{ l.id }}">{{ l.project }} - {{ l.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Turno de Destino <small class="text-muted">(opcional)</small></label>
+                        <select class="form-select" name="target_shift_id">
+                            <option value="">Manter turno</option>
+                            {% for s in transfer_shifts %}
+                            <option value="{{ s.id }}">{{ s.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Observações <small class="text-muted">(opcional)</small></label>
+                        <textarea class="form-control" name="notes" rows="2" maxlength="500"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-info" id="transferSubmit">
+                        <i class="bi bi-send"></i> Enviar Solicitação
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
+<!-- Toast container -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="transferToastContainer"></div>
+
+{% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/filters.js') }}"></script>
 <script>
@@ -409,10 +520,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedDate = "{{ selected_date }}";
     const selectedShift = "{{ selected_shift }}";
     const selectedLine = "{{ selected_line }}";
+    const editingLocked = {{ 'true' if editing_locked else 'false' }};
 
     // ========== Quick Action Buttons ==========
     document.querySelectorAll('.quick-action-btn').forEach(btn => {
         btn.addEventListener('click', function() {
+            if (editingLocked) {
+                alert('Registros de meses anteriores estão congelados. Contate um Administrador.');
+                return;
+            }
             const row = this.closest('tr');
             const employeeId = row.dataset.employeeId;
             const employeeName = row.dataset.employeeName;
@@ -773,4 +889,8 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script src="{{ url_for('static', filename='js/leader.js') }}"></script>
+    <script id="transferData" type="application/json">{{ transfer_data | tojson }}</script>
+
+    <script src="{{ url_for('static', filename='js/transfers.js') }}"></script>
+
 {% endblock %}

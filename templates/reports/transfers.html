@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico de Movimentações{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-clock-history"></i> Histórico de Movimentações</h1>
+    <a href="{{ url_for('transfer.index') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left-right"></i> Solicitações
+    </a>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('reports.transfers') }}" class="row g-2">
+            <div class="col-md-2">
+                <label class="form-label">De</label>
+                <input type="date" class="form-control" name="date_from" value="{{ date_from }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Até</label>
+                <input type="date" class="form-control" name="date_to" value="{{ date_to }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Linha Origem</label>
+                <select class="form-select" name="origin_line">
+                    <option value="">Todas</option>
+                    {% for l in lines %}
+                    <option value="{{ l.id }}" {% if origin_line == l.id|string %}selected{% endif %}>{{ l.project }} - {{ l.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Linha Destino</label>
+                <select class="form-select" name="target_line">
+                    <option value="">Todas</option>
+                    {% for l in lines %}
+                    <option value="{{ l.id }}" {% if target_line == l.id|string %}selected{% endif %}>{{ l.project }} - {{ l.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Funcionário</label>
+                <input type="text" class="form-control" name="employee" value="{{ employee }}" placeholder="ID">
+            </div>
+            <div class="col-md-2 d-flex gap-1 align-items-end">
+                <button type="submit" class="btn btn-primary flex-fill"><i class="bi bi-search"></i></button>
+                <a href="{{ url_for('reports.transfers_export', date_from=date_from, date_to=date_to, origin_line=origin_line, target_line=target_line, employee=employee) }}" class="btn btn-success flex-fill" title="Exportar Excel">
+                    <i class="bi bi-file-earmark-excel"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow">
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Funcionário</th>
+                    <th>Linha Origem</th>
+                    <th>Turno</th>
+                    <th>Linha Destino</th>
+                    <th>Turno</th>
+                    <th>Aprovado por</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log.timestamp.strftime('%d/%m/%Y %H:%M') if log.timestamp else '—' }}</td>
+                    <td>
+                        {{ log.employee.name if log.employee else log.employee_id }}
+                        <div><small class="text-muted">{{ log.employee_id }}</small></div>
+                    </td>
+                    <td>{{ log.origin_line.name if log.origin_line else '—' }}</td>
+                    <td>{{ log.origin_shift_id if log.origin_shift_id else '—' }}</td>
+                    <td>{{ log.target_line.name if log.target_line else '—' }}</td>
+                    <td>{{ log.target_shift_id if log.target_shift_id else '—' }}</td>
+                    <td>{{ log.approved_by.username if log.approved_by else '—' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-4">Nenhuma movimentação registrada.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

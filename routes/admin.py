@@ -9,6 +9,7 @@ from models.audit_log import AuditLog
 from models.shift import Shift
 from models.line import Line
 from models.leader_scope import LeaderScope
+from models.calendar import CompanyCalendar
 from services.excel_service import process_excel_upload, analyze_excel_upload, generate_absenteeism_report
 from services.metrics_service import calculate_shift_net_minutes
 from services.employee_service import migrate_employee_id
@@ -16,6 +17,7 @@ from functools import wraps
 import io
 import os
 import json
+import calendar as pycalendar
 import sqlite3
 import uuid
 import pandas as pd
@@ -36,8 +38,35 @@ def admin_required(f):
     return decorated_function
 
 
+def staff_required(f):
+    """Decorator to allow access to ADMIN and SUPERVISOR roles only."""
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        if current_user.role not in ('ADMIN', 'SUPERVISOR'):
+            flash('Acesso restrito ao administrador ou supervisor.', 'danger')
+            return redirect(url_for('leader.index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def admin_only_required(f):
+    """Decorator that returns HTTP 403 for non-ADMIN roles (used on protected routes).
+
+    Unlike ``admin_required`` (which redirects), this enforces a hard block so that
+    a SUPERVISOR accessing the route directly receives a 403 response.
+    """
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        if current_user.role != 'ADMIN':
+            return jsonify({'error': 'Acesso restrito ao administrador.'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 @admin_bp.route('/')
-@admin_required
+@staff_required
 def admin_home():
     """Admin dashboard home."""
     total_employees = Employee.query.filter_by(status='ACTIVE').count()
@@ -58,7 +87,7 @@ def admin_home():
 
 
 @admin_bp.route('/upload', methods=['GET'])
-@admin_required
+@staff_required
 def upload():
     """Excel upload page (two-step: analyze then confirm)."""
     summary = session.pop('upload_summary', None)
@@ -84,7 +113,7 @@ def _clear_upload(token):
 
 
 @admin_bp.route('/upload/analyze', methods=['POST'])
-@admin_required
+@staff_required
 def upload_analyze():
     """Dry-run: stage the file and return a preview summary WITHOUT writing to DB."""
     file = request.files.get('excel_file')
@@ -115,7 +144,7 @@ def upload_analyze():
 
 
 @admin_bp.route('/upload/confirm', methods=['POST'])
-@admin_required
+@staff_required
 def upload_confirm():
     """Commit the previously analyzed file to the database."""
     token = session.get('upload_token')
@@ -519,7 +548,7 @@ def _format_file_size(num_bytes):
 
 
 @admin_bp.route('/database', methods=['GET'])
-@admin_required
+@admin_only_required
 def database():
     """Database management panel: record counts, exports, and protected resets."""
     counts = {
@@ -550,7 +579,7 @@ def database():
 
 
 @admin_bp.route('/database/export/<table_name>', methods=['GET'])
-@admin_required
+@admin_only_required
 def database_export(table_name):
     """Export all records of a table to an Excel (.xlsx) file."""
     model = _TABLE_EXPORT_MAP.get(table_name)
@@ -577,7 +606,7 @@ def database_export(table_name):
 
 
 @admin_bp.route('/database/clear-attendance', methods=['POST'])
-@admin_required
+@admin_only_required
 def database_clear_attendance():
     """Delete all attendance records (requires admin password re-entry)."""
     password = request.form.get('password', '')
@@ -592,7 +621,7 @@ def database_clear_attendance():
 
 
 @admin_bp.route('/database/clear-employees', methods=['POST'])
-@admin_required
+@admin_only_required
 def database_clear_employees():
     """Delete Employee & Allocation records (requires admin password re-entry).
 
@@ -619,7 +648,7 @@ def database_clear_employees():
 # ─────────────────── SHIFT MANAGEMENT CRUD ───────────────────
 
 @admin_bp.route('/shifts', methods=['GET'])
-@admin_required
+@staff_required
 def shifts():
     """List all configured shifts."""
     all_shifts = Shift.query.order_by(Shift.id).all()
@@ -646,7 +675,7 @@ def _parse_work_days(form):
 
 
 @admin_bp.route('/shifts/add', methods=['POST'])
-@admin_required
+@staff_required
 def shifts_add():
     """Add a new shift."""
     shift_id = request.form.get('id', type=int)
@@ -684,7 +713,7 @@ def shifts_add():
 
 
 @admin_bp.route('/shifts/edit/<int:shift_id>', methods=['POST'])
-@admin_required
+@staff_required
 def shifts_edit(shift_id):
     """Update an existing shift."""
     shift = Shift.query.get_or_404(shift_id)
@@ -707,7 +736,7 @@ def shifts_edit(shift_id):
 
 
 @admin_bp.route('/shifts/toggle/<int:shift_id>', methods=['POST'])
-@admin_required
+@staff_required
 def shifts_toggle(shift_id):
     """Activate or deactivate a shift."""
     shift = Shift.query.get_or_404(shift_id)
@@ -721,7 +750,7 @@ def shifts_toggle(shift_id):
 # ─────────────────── LINE & PROJECT MANAGEMENT CRUD ───────────────────
 
 @admin_bp.route('/lines', methods=['GET'])
-@admin_required
+@staff_required
 def lines():
     """List all lines with allocation and assignment counts."""
     search = request.args.get('search', '').strip()
@@ -752,7 +781,7 @@ def lines():
 
 
 @admin_bp.route('/lines/add', methods=['POST'])
-@admin_required
+@staff_required
 def lines_add():
     """Create a new line."""
     name = request.form.get('name', '').strip()
@@ -773,7 +802,7 @@ def lines_add():
 
 
 @admin_bp.route('/lines/edit/<int:line_id>', methods=['POST'])
-@admin_required
+@staff_required
 def lines_edit(line_id):
     """Edit a line's name and project."""
     line = Line.query.get_or_404(line_id)
@@ -799,7 +828,7 @@ def lines_edit(line_id):
 
 
 @admin_bp.route('/lines/toggle/<int:line_id>', methods=['POST'])
-@admin_required
+@staff_required
 def lines_toggle(line_id):
     """Activate or deactivate a line."""
     line = Line.query.get_or_404(line_id)
@@ -810,13 +839,163 @@ def lines_toggle(line_id):
     return redirect(url_for('admin.lines'))
 
 
+# ─────────────────── COMPANY CALENDAR (HOLIDAYS / BRIDGE DAYS) ───────────────────
+
+_CALENDAR_TYPE_LABELS = {
+    'FERIADO': 'Feriado',
+    'FOLGA_COMPENSADA': 'Folga Compensada (ponte)',
+    'SABADO_LETIVO': 'Sábado Letivo',
+}
+
+
+@admin_bp.route('/calendar', methods=['GET'])
+@staff_required
+def calendar():
+    """Company calendar management: mark/unmark holidays, bridge days and make-up Saturdays."""
+    today = date.today()
+    try:
+        year = int(request.args.get('year', today.year))
+        month = int(request.args.get('month', today.month))
+    except (ValueError, TypeError):
+        year, month = today.year, today.month
+    if not (1 <= month <= 12):
+        month = today.month
+    if year < 2000 or year > 2100:
+        year = today.year
+
+    first_weekday, days_in_month = pycalendar.monthrange(year, month)
+
+    entries = CompanyCalendar.query.filter(
+        CompanyCalendar.date >= date(year, month, 1),
+        CompanyCalendar.date <= date(year, month, days_in_month)
+    ).order_by(CompanyCalendar.date).all()
+    entry_map = {e.date: e for e in entries}
+
+    weeks = []
+    week = []
+    for _ in range(first_weekday):
+        week.append(None)
+    for day in range(1, days_in_month + 1):
+        week.append(day)
+        if len(week) == 7:
+            weeks.append(week)
+            week = []
+    if week:
+        while len(week) < 7:
+            week.append(None)
+        weeks.append(week)
+
+    # Previous / next month navigation
+    if month == 1:
+        prev_month, prev_year = 12, year - 1
+    else:
+        prev_month, prev_year = month - 1, year
+    if month == 12:
+        next_month, next_year = 1, year + 1
+    else:
+        next_month, next_year = month + 1, year
+
+    return render_template(
+        'admin/calendar.html',
+        year=year,
+        month=month,
+        today=today,
+        weeks=weeks,
+        entry_map=entry_map,
+        type_labels=_CALENDAR_TYPE_LABELS,
+        month_names=pycalendar.month_name,
+        prev_year=prev_year,
+        prev_month=prev_month,
+        next_year=next_year,
+        next_month=next_month,
+    )
+
+
+@admin_bp.route('/calendar/add', methods=['POST'])
+@staff_required
+def calendar_add():
+    """Add or update a calendar exception for a given date (unique per date)."""
+    date_str = request.form.get('date', '').strip()
+    cal_type = request.form.get('type', '').strip()
+    description = request.form.get('description', '').strip()
+
+    back = url_for('admin.calendar')
+
+    try:
+        rec_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        flash('Data inválida. Use o formato AAAA-MM-DD.', 'danger')
+        return redirect(back)
+
+    if cal_type not in _CALENDAR_TYPE_LABELS:
+        flash('Tipo de calendário inválido.', 'danger')
+        return redirect(back)
+
+    entry = CompanyCalendar.query.filter_by(date=rec_date).first()
+    if entry:
+        entry.type = cal_type
+        entry.description = description or None
+        db.session.commit()
+        flash(f'Exceção atualizada para {rec_date.isoformat()}.', 'success')
+    else:
+        db.session.add(CompanyCalendar(
+            date=rec_date,
+            type=cal_type,
+            description=description or None
+        ))
+        db.session.commit()
+        flash(f'Exceção de calendário adicionada em {rec_date.isoformat()}.', 'success')
+
+    return redirect(url_for('admin.calendar', year=rec_date.year, month=rec_date.month))
+
+
+@admin_bp.route('/calendar/remove', methods=['POST'])
+@staff_required
+def calendar_remove():
+    """Remove a calendar exception for a given date."""
+    date_str = request.form.get('date', '').strip()
+    try:
+        rec_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        flash('Data inválida.', 'danger')
+        return redirect(url_for('admin.calendar'))
+
+    entry = CompanyCalendar.query.filter_by(date=rec_date).first()
+    if entry:
+        db.session.delete(entry)
+        db.session.commit()
+        flash(f'Exceção removida para {rec_date.isoformat()}.', 'success')
+    else:
+        flash('Nenhuma exceção encontrada para esta data.', 'warning')
+
+    return redirect(url_for('admin.calendar', year=rec_date.year, month=rec_date.month))
+
+
+
+@admin_bp.route('/calendar/sync-official', methods=['POST'])
+@staff_required
+def calendar_sync_official():
+    """Reload official national/state/municipal holidays for the configured years."""
+    from services.calendar_service import seed_official_holidays
+    added = seed_official_holidays()
+    if added:
+        flash(f'{added} feriado(s) oficial(is) carregado(s) no calendário da empresa.', 'success')
+    else:
+        flash('Calendário já estava atualizado (nenhum feriado novo).', 'info')
+    return redirect(url_for('admin.calendar'))
+
+
+
 # ─────────────────── EMPLOYEE VACATION MANAGEMENT ───────────────────
 
 @admin_bp.route('/employees', methods=['GET'])
-@admin_required
+@staff_required
 def employees():
-    """Employee management view with vacation period editing."""
+    """Employee management view: list with search + line/shift filters, CRUD."""
     search = request.args.get('search', '').strip()
+    line_filter = request.args.get('line', '').strip()
+    shift_filter = request.args.get('shift', '').strip()
+    status_filter = request.args.get('status', '').strip()
     page = request.args.get('page', 1, type=int)
     per_page = 50
 
@@ -826,20 +1005,132 @@ def employees():
         query = query.filter(
             db.or_(Employee.id.ilike(pattern), Employee.name.ilike(pattern))
         )
+    if line_filter:
+        try:
+            query = query.filter(Employee.line_id == int(line_filter))
+        except ValueError:
+            pass
+    if shift_filter:
+        try:
+            query = query.filter(Employee.shift_id == int(shift_filter))
+        except ValueError:
+            pass
+    if status_filter == 'active':
+        query = query.filter(Employee.is_active.is_(True))
+    elif status_filter == 'inactive':
+        query = query.filter(Employee.is_active.is_(False))
 
     pagination = query.order_by(Employee.name).paginate(
         page=page, per_page=per_page, error_out=False
     )
 
+    lines = Line.query.filter_by(is_active=True).order_by(Line.project, Line.name).all()
+    shifts = Shift.query.filter_by(is_active=True).order_by(Shift.id).all()
+
     return render_template(
         'admin/employees.html',
         pagination=pagination,
-        search=search
+        search=search,
+        line_filter=line_filter,
+        shift_filter=shift_filter,
+        status_filter=status_filter,
+        lines=lines,
+        shifts=shifts,
     )
 
 
+@admin_bp.route('/employees/create', methods=['POST'])
+@staff_required
+def employee_create():
+    """Create a new employee and provision its active Allocation."""
+    emp_id = request.form.get('id', '').strip()
+    name = request.form.get('name', '').strip()
+    line_id = request.form.get('line_id', '').strip()
+    shift_id = request.form.get('shift_id', '').strip()
+
+    if not emp_id or not name:
+        flash('Matrícula e nome são obrigatórios.', 'warning')
+        return redirect(url_for('admin.employees'))
+
+    if Employee.query.get(emp_id):
+        flash(f'Já existe um funcionário com a matrícula {emp_id}.', 'danger')
+        return redirect(url_for('admin.employees'))
+
+    line = Line.query.get(int(line_id)) if line_id.isdigit() else None
+    shift = Shift.query.get(int(shift_id)) if shift_id.isdigit() else None
+    if not line or not shift:
+        flash('Linha e turno são obrigatórios.', 'warning')
+        return redirect(url_for('admin.employees'))
+
+    emp = Employee(
+        id=emp_id,
+        name=name,
+        status='ACTIVE',
+        is_active=True,
+        line_id=line.id,
+        shift_id=shift.id,
+        project_id=None,
+    )
+    db.session.add(emp)
+    db.session.flush()
+    emp.sync_allocation(commit=False)
+    db.session.commit()
+
+    flash(f'Funcionário {name} criado com sucesso.', 'success')
+    return redirect(url_for('admin.employees'))
+
+
+@admin_bp.route('/employees/<employee_id>/edit', methods=['POST'])
+@staff_required
+def employee_edit(employee_id):
+    """Update an employee's name, line, shift and status (syncs active Allocation)."""
+    emp = Employee.query.get_or_404(employee_id)
+
+    name = request.form.get('name', '').strip()
+    line_id = request.form.get('line_id', '').strip()
+    shift_id = request.form.get('shift_id', '').strip()
+    is_active = request.form.get('is_active')
+
+    if name:
+        emp.name = name
+
+    line = Line.query.get(int(line_id)) if line_id.isdigit() else None
+    if line:
+        emp.line_id = line.id
+    shift = Shift.query.get(int(shift_id)) if shift_id.isdigit() else None
+    if shift:
+        emp.shift_id = shift.id
+
+    if is_active is not None:
+        emp.is_active = (is_active == 'on')
+    emp.status = 'ACTIVE' if emp.is_active else 'INACTIVE'
+
+    emp.sync_allocation(commit=False)
+    db.session.commit()
+
+    flash(f'Dados de {emp.name} atualizados.', 'success')
+    return redirect(url_for('admin.employees'))
+
+
+@admin_bp.route('/employees/<employee_id>/toggle-status', methods=['POST'])
+@staff_required
+def employee_toggle_status(employee_id):
+    """Soft-delete / inactivate an employee, preserving historical attendance records."""
+    emp = Employee.query.get_or_404(employee_id)
+    emp.is_active = not emp.is_active
+    emp.status = 'ACTIVE' if emp.is_active else 'INACTIVE'
+    db.session.commit()
+
+    if emp.is_active:
+        flash(f'Funcionário {emp.name} reativado.', 'success')
+    else:
+        flash(f'Funcionário {emp.name} inativado. O histórico de apontamentos foi preservado.', 'info')
+    return redirect(url_for('admin.employees'))
+
+
+
 @admin_bp.route('/employees/<employee_id>/vacation', methods=['POST'])
-@admin_required
+@staff_required
 def employee_vacation(employee_id):
     """Set or clear an employee's vacation period."""
     emp = Employee.query.get_or_404(employee_id)
@@ -884,7 +1175,7 @@ def employee_vacation(employee_id):
 
 
 @admin_bp.route('/employees/<employee_id>/migrate-id', methods=['POST'])
-@admin_required
+@staff_required
 def employee_migrate_id(employee_id):
     """Migrate an employee's registration number (matrícula) to a new ID."""
     new_id = request.form.get('new_id', '').strip()

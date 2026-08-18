@@ -21,6 +21,7 @@
                 <label class="form-label">Perfil</label>
                 <select class="form-select" name="role" id="roleSelect">
                     <option value="LIDER">Líder</option>
+                    <option value="SUPERVISOR">Supervisor</option>
                     <option value="ADMIN">Administrador</option>
                 </select>
             </div>
@@ -60,7 +61,7 @@
                     <td>{{ user.id }}</td>
                     <td>{{ user.username }}</td>
                     <td>
-                        <span class="badge bg-{{ 'danger' if user.role == 'ADMIN' else 'info' }}">
+                        <span class="badge bg-{{ 'danger' if user.role == 'ADMIN' else ('warning' if user.role == 'SUPERVISOR' else 'info') }}">
                             {{ user.role }}
                         </span>
                     </td>

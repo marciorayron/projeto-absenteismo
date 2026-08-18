@@ -7,8 +7,11 @@ from models.line_validation import LineValidation
 from models.shift import Shift
 from models.line import Line
 from models.leader_scope import LeaderScope
+from models.calendar import CompanyCalendar
+from models.transfer import TransferRequest, EmployeeMovementLog
 
 __all__ = [
     'User', 'Employee', 'Allocation', 'Attendance', 'AuditLog',
-    'LineValidation', 'Shift', 'Line', 'LeaderScope'
+    'LineValidation', 'Shift', 'Line', 'LeaderScope', 'CompanyCalendar',
+    'TransferRequest', 'EmployeeMovementLog'
 ]

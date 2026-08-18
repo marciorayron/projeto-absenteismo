@@ -1,5 +1,5 @@
 from flask import Flask, redirect, url_for, request, jsonify
-from flask_login import login_required
+from flask_login import login_required, current_user
 from config import Config
 from extensions import db, login_manager, bcrypt
 
@@ -13,6 +13,14 @@ def create_app():
     bcrypt.init_app(app)
 
     login_manager.login_view = 'auth.login'
+
+    @app.context_processor
+    def inject_transfer_pending():
+        """Inject the pending transfer count for the navigation badge."""
+        from routes.transfer import pending_transfer_count
+        if current_user.is_authenticated:
+            return {'pending_transfer_count': pending_transfer_count()}
+        return {'pending_transfer_count': 0}
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -71,12 +79,14 @@ def create_app():
     from routes.admin import admin_bp
     from routes.dashboard import dashboard_bp
     from routes.reports import reports_bp
+    from routes.transfer import transfer_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(leader_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(reports_bp)
+    app.register_blueprint(transfer_bp)
 
     with app.app_context():
         db.create_all()

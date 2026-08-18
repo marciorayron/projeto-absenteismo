@@ -216,6 +216,45 @@
     </div>
 </div>
 
+<!-- Charts row 3: Top Absentees + Day of Week -->
+<div class="row mb-4">
+    <div class="col-md-6 mb-4">
+        <div class="card chart-card">
+            <div class="card-header">
+                <span>🏆 Top Colaboradores Ausentes (Ranking)</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Nome</th>
+                                <th>Linha</th>
+                                <th>Turno</th>
+                                <th>Ocorrências</th>
+                                <th>Dias Ausentes</th>
+                                <th>Score Bradford</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topAbsenteesBody">
+                            <tr><td colspan="6" class="text-center text-muted">Carregando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card chart-card">
+            <div class="card-header">Ausências por Dia da Semana</div>
+            <div class="card-body">
+                <canvas id="chartByDayOfWeek" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+
 <!-- Pending Audits Modal -->
 <div class="modal fade" id="modalPendingAudits" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">

@@ -20,7 +20,7 @@ def login():
         if user and bcrypt.check_password_hash(user.password_hash, password):
             if user.is_active:
                 login_user(user)
-                if user.role == 'ADMIN':
+                if user.role in ('ADMIN', 'SUPERVISOR'):
                     return redirect(url_for('admin.admin_home'))
                 return redirect(url_for('leader.index'))
             else:

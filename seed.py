@@ -3,6 +3,7 @@ from models.user import User
 from models.shift import Shift
 from models.line import Line
 from services.metrics_service import calculate_shift_net_minutes
+from services.calendar_service import seed_official_holidays
 
 # Canonical list of official lines grouped by project. These are seeded into the
 # `Line` table so that the Excel import can match (Project, Line) exactly.
@@ -87,6 +88,18 @@ def create_initial_users(app):
             db.session.add(leader)
             print('Usuário lider criado (senha: lider123)')
 
+        # Check if supervisor user exists
+        supervisor = User.query.filter_by(username='supervisor').first()
+        if not supervisor:
+            supervisor = User(
+                username='supervisor',
+                password_hash=bcrypt.generate_password_hash('supervisor123').decode('utf-8'),
+                role='SUPERVISOR',
+                is_active=True
+            )
+            db.session.add(supervisor)
+            print('Usuário supervisor criado (senha: supervisor123)')
+
         # Seed default shifts if table is empty
         if Shift.query.count() == 0:
             default_shifts = [
@@ -115,3 +128,19 @@ def create_initial_users(app):
 
         # Ensure the official line catalog is present.
         seed_official_lines()
+
+        # Pre-populate official holidays (national + state + municipal).
+        added = seed_official_holidays()
+        if added:
+            print(f'{added} feriado(s) oficial(is) adicionado(s) ao calendário da empresa.')
+        else:
+            print('Calendário da empresa já estava atualizado (nenhum feriado novo).')
+
+
+if __name__ == '__main__':
+    from app import create_app
+
+    app = create_app()
+    with app.app_context():
+        create_initial_users(app)
+        print('Seed concluído com sucesso!')

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Calendário da Empresa{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-calendar3"></i> Calendário da Empresa</h1>
+    <div class="btn-group">
+        <form method="POST" action="{{ url_for('admin.calendar_sync_official') }}" class="d-inline me-2">
+            <button type="submit" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-repeat"></i> 🔄 Recarregar Feriados Nacionais/Locais
+            </button>
+        </form>
+        <a href="{{ url_for('admin.upload') }}" class="btn btn-success">
+            <i class="bi bi-cloud-upload"></i> Upload Excel
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Add/Edit exception form -->
+    <div class="col-md-4 mb-4">
+        <div class="card shadow">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-plus-circle"></i> Marcar Exceção</h6>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('admin.calendar_add') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Data</label>
+                        <input type="date" class="form-control" name="date" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Tipo</label>
+                        <select class="form-select" name="type" required>
+                            <option value="FERIADO">Feriado</option>
+                            <option value="FOLGA_COMPENSADA">Folga Compensada (ponte)</option>
+                            <option value="SABADO_LETIVO">Sábado Letivo</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descrição <small class="text-muted">(opcional)</small></label>
+                        <input type="text" class="form-control" name="description" maxlength="255" placeholder="Ex.: Natal, Ponto facultativo...">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-check-lg"></i> Salvar
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow mt-4">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-list"></i> Exceções do Mês</h6>
+            </div>
+            <ul class="list-group list-group-flush">
+                {% for e in entry_map.values() %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>{{ e.date.strftime('%d/%m/%Y') }}</strong>
+                            <span class="badge {{ 'bg-danger' if e.type == 'FERIADO' else ('bg-warning text-dark' if e.type == 'FOLGA_COMPENSADA' else 'bg-info') }}">
+                                {{ type_labels.get(e.type, e.type) }}
+                            </span>
+                            {% if e.description %}
+                            <div><small class="text-muted">{{ e.description }}</small></div>
+                            {% endif %}
+                        </div>
+                        <form method="POST" action="{{ url_for('admin.calendar_remove') }}" onsubmit="return confirm('Remover esta exceção?');">
+                            <input type="hidden" name="date" value="{{ e.date.isoformat() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </li>
+                {% else %}
+                    <li class="list-group-item text-muted">Nenhuma exceção neste mês.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+    <!-- Calendar grid -->
+    <div class="col-md-8 mb-4">
+        <div class="card shadow">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <a href="{{ url_for('admin.calendar', year=prev_year, month=prev_month) }}" class="btn btn-outline-secondary btn-sm">&laquo;</a>
+                <h6 class="mb-0">{{ month_names[month] }} {{ year }}</h6>
+                <a href="{{ url_for('admin.calendar', year=next_year, month=next_month) }}" class="btn btn-outline-secondary btn-sm">&raquo;</a>
+            </div>
+            <div class="card-body">
+                <table class="table table-bordered text-center">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Seg</th><th>Ter</th><th>Qua</th><th>Qui</th><th>Sex</th><th>Sáb</th><th>Dom</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for week in weeks %}
+                        <tr>
+                            {% for day in week %}
+                                {% if day is none %}
+                                    <td></td>
+                                {% else %}
+                                    {% set d = today.replace(year=year, month=month, day=day) %}
+                                    {% set entry = entry_map.get(d) %}
+                                    <td class="{{ 'table-danger' if entry and entry.type == 'FERIADO' else ('table-warning' if entry and entry.type == 'FOLGA_COMPENSADA' else ('table-info' if entry and entry.type == 'SABADO_LETIVO' else '')) }}">
+                                        {{ day }}
+                                        {% if entry %}
+                                            <div>
+                                                <span class="badge {{ 'bg-danger' if entry.type == 'FERIADO' else ('bg-warning text-dark' if entry.type == 'FOLGA_COMPENSADA' else 'bg-info') }}">
+                                                    {{ type_labels.get(entry.type, entry.type) }}
+                                                </span>
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                {% endif %}
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="mt-2 small text-muted">
+                    <span class="badge bg-danger">Feriado</span> ignorado nas métricas de ausência
+                    &nbsp;&nbsp;<span class="badge bg-warning text-dark">Folga Compensada</span> ignorado nas métricas
+                    &nbsp;&nbsp;<span class="badge bg-info">Sábado Letivo</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

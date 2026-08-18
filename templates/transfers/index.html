@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Transferências{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-arrow-left-right"></i> Transferências de Linha</h1>
+    <div class="btn-group">
+        <a href="{{ url_for('leader.index') }}" class="btn btn-outline-primary">
+            <i class="bi bi-person-check"></i> Operação
+        </a>
+        <a href="{{ url_for('reports.transfers') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-clock-history"></i> Histórico de Movimentações
+        </a>
+    </div>
+</div>
+
+<div class="card shadow">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-list-ul"></i> Solicitações de Transferência</h6>
+        <span class="badge bg-warning text-dark">{{ pending_count }} pendente{{ 's' if pending_count != 1 else '' }}</span>
+    </div>
+    <div class="card-body table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Colaborador</th>
+                    <th>Tipo</th>
+                    <th>Origem</th>
+                    <th>Destino</th>
+                    <th>Solicitante</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in requests %}
+                <tr>
+                    <td>{{ r.id }}</td>
+                    <td>
+                        {{ r.employee.name if r.employee else r.employee_id }}
+                        <div><small class="text-muted">{{ r.employee_id }}</small></div>
+                    </td>
+                    <td>
+                        {% if r.request_type == 'PUSH' %}
+                        <span class="badge bg-info">Enviar</span>
+                        {% else %}
+                        <span class="badge bg-primary">Receber</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ r.origin_line.name if r.origin_line else '—' }}
+                        <div><small class="text-muted">{{ r.origin_line.project if r.origin_line else '' }}{% if r.origin_shift %}{% if r.origin_line %} · {% endif %}Turno {{ r.origin_shift_id }}{% endif %}</small></div>
+                    </td>
+                    <td>
+                        {{ r.target_line.name if r.target_line else '—' }}
+                        <div><small class="text-muted">{{ r.target_line.project if r.target_line else '' }}{% if r.target_shift %}{% if r.target_line %} · {% endif %}Turno {{ r.target_shift_id }}{% endif %}</small></div>
+                    </td>
+                    <td>{{ r.requester.username if r.requester else '—' }}</td>
+                    <td>
+                        {% if r.status == 'PENDING' %}
+                        <span class="badge bg-warning text-dark">Pendente</span>
+                        {% elif r.status == 'APPROVED' %}
+                        <span class="badge bg-success">Aprovado</span>
+                        {% elif r.status == 'REJECTED' %}
+                        <span class="badge bg-danger">Rejeitado</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Cancelado</span>
+                        {% endif %}
+                        {% if r.notes %}<div><small class="text-muted" title="Observações">{{ r.notes }}</small></div>{% endif %}
+                    </td>
+                    <td>
+                        <div class="d-flex gap-1 flex-wrap">
+                            {% if r.status == 'PENDING' and r.id in respondable_ids %}
+                            <form method="POST" action="{{ url_for('transfer.respond', transfer_id=r.id) }}" class="d-inline" onsubmit="return confirm('Aprovar esta transferência?');">
+                                <input type="hidden" name="decision" value="APPROVE">
+                                <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Aprovar</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('transfer.respond', transfer_id=r.id) }}" class="d-inline" onsubmit="return confirm('Rejeitar esta solicitação?');">
+                                <input type="hidden" name="decision" value="REJECT">
+                                <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-x-lg"></i> Rejeitar</button>
+                            </form>
+                            {% elif r.status == 'PENDING' and r.id in can_cancel %}
+                            <form method="POST" action="{{ url_for('transfer.cancel', transfer_id=r.id) }}" class="d-inline" onsubmit="return confirm('Cancelar esta solicitação?');">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-circle"></i> Cancelar</button>
+                            </form>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">Nenhuma solicitação de transferência.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+

@@ -8,10 +8,28 @@ from models.line_validation import LineValidation
 from models.user import User
 from models.line import Line
 from models.leader_scope import LeaderScope
+from models.calendar import CompanyCalendar
 from services.metrics_service import calculate_bradford_bulk
 from datetime import date, datetime, timedelta
+from collections import defaultdict
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
+
+
+def _get_calendar_exclusion_dates(start, end):
+    """Return the set of dates flagged as FERIADO or FOLGA_COMPENSADA in the range.
+
+    These dates are not working days for the company, so automated absence
+    calculations must ignore them to avoid skewing absenteeism metrics.
+    """
+    if start is None or end is None:
+        return set()
+    rows = CompanyCalendar.query.filter(
+        CompanyCalendar.type.in_(['FERIADO', 'FOLGA_COMPENSADA']),
+        CompanyCalendar.date >= start,
+        CompanyCalendar.date <= end
+    ).all()
+    return {r.date for r in rows}
 
 
 def _parse_date_range():
@@ -139,6 +157,8 @@ def api_overview():
     if error:
         return error, code
 
+    exclusion_dates = _get_calendar_exclusion_dates(start, end)
+
     shifts, projects, lines = _get_filter_params()
     has_filters = _has_filters(shifts, projects, lines)
 
@@ -165,6 +185,8 @@ def api_overview():
         Attendance.record_date >= start,
         Attendance.record_date <= end
     )
+    if exclusion_dates:
+        att_base = att_base.filter(Attendance.record_date.notin_(exclusion_dates))
     if emp_ids is not None:
         att_base = att_base.filter(Attendance.employee_id.in_(emp_ids))
 
@@ -183,6 +205,8 @@ def api_overview():
         Attendance.record_date <= end,
         Attendance.event_type != 'VACATION'
     )
+    if exclusion_dates:
+        agg = agg.filter(Attendance.record_date.notin_(exclusion_dates))
     if emp_ids is not None:
         agg = agg.filter(Attendance.employee_id.in_(emp_ids))
 
@@ -257,6 +281,8 @@ def api_by_line():
     if error:
         return error, code
 
+    exclusion_dates = _get_calendar_exclusion_dates(start, end)
+
     shifts, projects, lines_filter = _get_filter_params()
 
     # Build the allocation filter for the subquery
@@ -300,6 +326,8 @@ def api_by_line():
         Attendance.event_type != 'VACATION'
     )
 
+    if exclusion_dates:
+        agg_query = agg_query.filter(Attendance.record_date.notin_(exclusion_dates))
     if emp_ids is not None:
         agg_query = agg_query.filter(Allocation.employee_id.in_(emp_ids))
     if lines_filter:
@@ -332,6 +360,8 @@ def api_by_project():
     start, end, error, code = _parse_date_range()
     if error:
         return error, code
+
+    exclusion_dates = _get_calendar_exclusion_dates(start, end)
 
     shifts, projects_filter, lines_filter = _get_filter_params()
 
@@ -377,6 +407,8 @@ def api_by_project():
         Attendance.event_type != 'VACATION'
     )
 
+    if exclusion_dates:
+        agg_query = agg_query.filter(Attendance.record_date.notin_(exclusion_dates))
     if emp_ids is not None:
         agg_query = agg_query.filter(Allocation.employee_id.in_(emp_ids))
     if projects_filter:
@@ -411,6 +443,8 @@ def api_by_shift():
     start, end, error, code = _parse_date_range()
     if error:
         return error, code
+
+    exclusion_dates = _get_calendar_exclusion_dates(start, end)
 
     shifts_filter, projects, lines = _get_filter_params()
 
@@ -454,6 +488,8 @@ def api_by_shift():
         Attendance.event_type != 'VACATION'
     )
 
+    if exclusion_dates:
+        agg_query = agg_query.filter(Attendance.record_date.notin_(exclusion_dates))
     if emp_ids is not None:
         agg_query = agg_query.filter(Allocation.employee_id.in_(emp_ids))
     if shifts_filter:
@@ -491,6 +527,8 @@ def api_daily_trend():
     if error:
         return error, code
 
+    exclusion_dates = _get_calendar_exclusion_dates(start, end)
+
     shifts, projects, lines = _get_filter_params()
     has_filters = _has_filters(shifts, projects, lines)
     emp_ids = None
@@ -510,6 +548,8 @@ def api_daily_trend():
         Attendance.event_type != 'VACATION'
     )
 
+    if exclusion_dates:
+        trend_query = trend_query.filter(Attendance.record_date.notin_(exclusion_dates))
     if emp_ids is not None:
         trend_query = trend_query.filter(Attendance.employee_id.in_(emp_ids))
 
@@ -536,6 +576,108 @@ def api_daily_trend():
         'lost_minutes': lost_minutes_list
     })
 
+@dashboard_bp.route('/api/top-absentees')
+@login_required
+def api_top_absentees():
+    """Ranking of the employees with the most absence in the selected period.
+
+    ``total_days_absent``: distinct non-present (and non-vacation) days.
+    ``occurrences``: number of distinct absence blocks (consecutive-day spells).
+    ``bradford_score`` = occurrences ** 2 * total_days_absent.
+    """
+    start, end, error, code = _parse_date_range()
+    if error:
+        return error, code
+
+    exclusion_dates = _get_calendar_exclusion_dates(start, end)
+    shifts, projects, lines = _get_filter_params()
+
+    emp_ids = None
+    if _has_filters(shifts, projects, lines):
+        emp_ids = _get_filtered_emp_ids(shifts, projects, lines)
+
+    # Distinct absence days per employee (exclude PRESENT and VACATION).
+    query = db.session.query(Attendance.employee_id, Attendance.record_date).filter(
+        Attendance.record_date >= start,
+        Attendance.record_date <= end,
+        Attendance.event_type.notin_(['PRESENT', 'VACATION'])
+    ).distinct()
+    if emp_ids is not None:
+        query = query.filter(Attendance.employee_id.in_(emp_ids))
+    if exclusion_dates:
+        query = query.filter(Attendance.record_date.notin_(exclusion_dates))
+
+    days_by_emp = defaultdict(set)
+    for emp_id, rec_date in query.all():
+        days_by_emp[emp_id].add(rec_date)
+
+    result = []
+    for emp_id, date_set in days_by_emp.items():
+        dates = sorted(date_set)
+        occurrences = 1 if dates else 0
+        for i in range(1, len(dates)):
+            if (dates[i] - dates[i - 1]).days > 1:
+                occurrences += 1
+        total_days = len(dates)
+        bradford = (occurrences ** 2) * total_days
+
+        emp = Employee.query.get(emp_id)
+        alloc = emp.get_active_allocation() if emp else None
+        result.append({
+            'employee_id': emp_id,
+            'name': emp.name if emp else emp_id,
+            'line': alloc.line if alloc else (emp.line_name if emp else '—'),
+            'shift': alloc.shift if alloc else (emp.shift_id if emp else None),
+            'occurrences': occurrences,
+            'total_days_absent': total_days,
+            'bradford_score': bradford,
+        })
+
+    result.sort(key=lambda x: (x['bradford_score'], x['total_days_absent']), reverse=True)
+    return jsonify({'top_absentees': result[:10]})
+
+
+@dashboard_bp.route('/api/by-day-of-week')
+@login_required
+def api_by_day_of_week():
+    """Absence volume grouped by weekday (Sunday=0 ... Saturday=6)."""
+    start, end, error, code = _parse_date_range()
+    if error:
+        return error, code
+
+    exclusion_dates = _get_calendar_exclusion_dates(start, end)
+    shifts, projects, lines = _get_filter_params()
+
+    emp_ids = None
+    if _has_filters(shifts, projects, lines):
+        emp_ids = _get_filtered_emp_ids(shifts, projects, lines)
+
+    query = db.session.query(
+        db.func.strftime('%w', Attendance.record_date).label('dow'),
+        db.func.count(db.distinct(
+            db.func.concat(Attendance.employee_id, '|', Attendance.record_date)
+        )).label('cnt')
+    ).filter(
+        Attendance.record_date >= start,
+        Attendance.record_date <= end,
+        Attendance.event_type.notin_(['PRESENT', 'VACATION'])
+    )
+    if emp_ids is not None:
+        query = query.filter(Attendance.employee_id.in_(emp_ids))
+    if exclusion_dates:
+        query = query.filter(Attendance.record_date.notin_(exclusion_dates))
+
+    rows = query.group_by('dow').all()
+    counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
+    for dow, cnt in rows:
+        if dow is not None:
+            counts[int(dow)] = cnt or 0
+
+    labels = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+    return jsonify({'days': labels, 'counts': [counts[i] for i in range(7)]})
+
+
+@dashboard_bp.route('/api/bradford-top-risks')
 
 @dashboard_bp.route('/api/bradford-top-risks')
 @login_required
