@@ -21,6 +21,8 @@ _COLUMN_MIGRATIONS = {
     ],
     'attendances': [
         ('justification_type', 'VARCHAR(20)'),
+        ('is_justified', 'BOOLEAN'),
+        ('status', 'VARCHAR(20)'),
         ('notes', 'TEXT'),
     ],
     'shifts': [

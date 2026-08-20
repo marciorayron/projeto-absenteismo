@@ -17,10 +17,26 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!modalEl || !form) return;
 
     var DATA = { scopeEmployees: [], allEmployees: [], lines: [], scopeLineIds: [], isStaff: false };
-    if (dataScript) {
+    // Prefer the global injected by the template; fall back to the older JSON script tag.
+    if (window.TRANSFER_DATA && typeof window.TRANSFER_DATA === 'object' && Object.keys(window.TRANSFER_DATA).length) {
+        DATA = window.TRANSFER_DATA;
+    } else if (dataScript) {
         try { DATA = JSON.parse(dataScript.textContent); } catch (e) { /* keep defaults */ }
     }
+
+    // Type-safety hardening: cast every scoped line id to Number once, at load time,
+    // so the scope-membership checks below never hit a silent string/number mismatch.
+    DATA.scopeLineIds = (DATA.scopeLineIds || []).map(normalizeLineId).filter(function (v) { return v !== null; });
+    DATA.scopeEmployees = (DATA.scopeEmployees || []).map(function (e) {
+        return { id: e.id, name: e.name, line_id: normalizeLineId(e.line_id) };
+    });
+    DATA.allEmployees = (DATA.allEmployees || []).map(function (e) {
+        return { id: e.id, name: e.name, line_id: normalizeLineId(e.line_id) };
+    });
+
     var isStaff = !!DATA.isStaff;
+
+    console.log('[Transfer Debug] DATA state:', DATA);
 
     // The leader's current line (first scoped line) — used as the PULL target.
     var currentLeaderLineId = (DATA.scopeLineIds && DATA.scopeLineIds.length) ? DATA.scopeLineIds[0] : '';
@@ -28,18 +44,53 @@ document.addEventListener('DOMContentLoaded', function () {
     // Tracks how the modal was opened: 'row' (locked to PUSH) or 'header'.
     var modalOrigin = 'header';
 
+    // ── Normalized line-id helpers ─────────────────────────────────────────
+    // Guards against silent string/number mismatches: a leader's scoped line ids
+    // and an employee's `line_id` can come from different sources (HTML attributes,
+    // JSON ints, form values) with different types. Every scope check below uses
+    // these helpers so `.includes()`/`.indexOf()` never fails silently.
+    function normalizeLineId(value) {
+        if (value === null || value === undefined || value === '') return null;
+        var n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function isEmployeeLineInScope(lineId) {
+        var n = normalizeLineId(lineId);
+        if (n === null) return false;
+        return DATA.scopeLineIds.includes(n);
+    }
+
+    function findEmployeeRecord(employeeId) {
+        var all = DATA.scopeEmployees.concat(DATA.allEmployees);
+        return all.find(function (e) { return String(e.id) === String(employeeId); }) || null;
+    }
+
     function ensureScopeData() {
-        // If the scope employee list is empty, fetch it from the backend so the
-        // employee dropdown is always populated (e.g. header trigger).
-        if (DATA.scopeEmployees.length > 0) return Promise.resolve();
+        // If the scope data is already present (template injection), nothing to do.
+        if (DATA.scopeEmployees.length > 0 && DATA.scopeLineIds.length > 0) {
+            console.log('[Transfer Debug] scope data already loaded.');
+            return Promise.resolve();
+        }
+        console.log('[Transfer Debug] scope data missing — fetching /leader/api/employees/scope');
+        // Fallback fetch so the dropdown is always populated even when the template
+        // injection is empty/undefined. Also reconstruct scopeLineIds from the payload.
         return fetch('/leader/api/employees/scope')
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 DATA.scopeEmployees = (data.employees || []).map(function (e) {
-                    return { id: e.employee_id, name: e.name };
+                    return { id: e.employee_id, name: e.name, line_id: normalizeLineId(e.line_id) };
                 });
+                if (DATA.scopeLineIds.length === 0) {
+                    var lineIds = {};
+                    DATA.scopeEmployees.forEach(function (e) {
+                        if (e.line_id !== null) lineIds[e.line_id] = true;
+                    });
+                    DATA.scopeLineIds = Object.keys(lineIds).map(Number);
+                }
+                console.log('[Transfer Debug] scope data refreshed:', DATA.scopeEmployees);
             })
-            .catch(function () { /* ignore */ });
+            .catch(function (err) { console.error('[Transfer Debug] scope fetch failed', err); });
     }
 
     function showToast(message, type) {
@@ -94,12 +145,25 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (type === 'PUSH') {
-            // Employee: the leader's current line operators.
-            // Line: ALL destination lines (including the current one) so intra-line
-            // shift transfers (same line, different shift) are possible.
+            // Employee: the leader's scoped-line operators.
+            // Explicitly enable "Enviar colaborador" when an in-scope operator is the target.
+            var pushRadio = form.querySelector('input[name="request_type"][value="PUSH"]');
+            if (pushRadio) pushRadio.disabled = false;
+
             populate(empSelect, DATA.scopeEmployees, selectedEmployeeId);
+
+            // Line: all destination lines EXCEPT the selected employee's origin line,
+            // so the target line always differs from the source line.
+            var originLineId = null;
+            if (selectedEmployeeId) {
+                var empRec = findEmployeeRecord(selectedEmployeeId);
+                if (empRec && empRec.line_id) originLineId = normalizeLineId(empRec.line_id);
+            }
             if (lineSelect) {
-                populate(lineSelect, DATA.lines, null, function (l) { return l.project + ' - ' + l.name; });
+                var destLines = DATA.lines.filter(function (l) {
+                    return originLineId === null || normalizeLineId(l.id) !== originLineId;
+                });
+                populate(lineSelect, destLines, null, function (l) { return l.project + ' - ' + l.name; });
                 lineSelect.disabled = false;
             }
         } else { // PULL
@@ -149,7 +213,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var type = requestType || 'PUSH';
         if (modalOrigin === 'row' && !requestType && employeeLineId) {
             // Row trigger without explicit type: decide by scope membership.
-            type = (DATA.scopeLineIds.indexOf(employeeLineId) !== -1) ? 'PUSH' : 'PULL';
+            type = isEmployeeLineInScope(employeeLineId) ? 'PUSH' : 'PULL';
         }
         var radio = form.querySelector('input[name="request_type"][value="' + type + '"]');
         if (radio) radio.checked = true;
@@ -161,8 +225,18 @@ document.addEventListener('DOMContentLoaded', function () {
         if (pushRadio) pushRadio.disabled = (lockType && type !== 'PUSH');
         if (pullRadio) pullRadio.disabled = (lockType && type !== 'PULL');
 
-        // Ensure the scope employee data is loaded before populating the dropdown,
-        // so the header trigger never opens with an empty employee list.
+        // Show the modal immediately with a "Carregando..." placeholder and block the
+        // submit until the scope data has arrived, so the header trigger never shows
+        // an empty/blank employee dropdown.
+        var submitBtn = document.getElementById('transferSubmit');
+        if (empSelect) {
+            empSelect.innerHTML = '<option value="">Carregando...</option>';
+            empSelect.disabled = true;
+        }
+        if (submitBtn) submitBtn.disabled = true;
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+        // Block until scope data is ready, then populate the dynamic fields.
         ensureScopeData().then(function () {
             refreshByType(employeeId || '');
 
@@ -176,7 +250,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             }
             updatePreviewLabel(employeeId, employeeName || findEmployeeName(employeeId));
-            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            if (submitBtn) submitBtn.disabled = false;
+        }).catch(function () {
+            if (submitBtn) submitBtn.disabled = false;
         });
     }
 
@@ -193,7 +269,7 @@ document.addEventListener('DOMContentLoaded', function () {
         empSelect.addEventListener('change', function () {
             var empId = empSelect.value;
             if (!empId) return;
-            var inScope = DATA.scopeEmployees.some(function (e) { return e.id === empId; });
+            var inScope = DATA.scopeEmployees.some(function (e) { return String(e.id) === String(empId); });
 
             if (!inScope) {
                 // Outside the leader's scope -> PULL (Receber), target = leader's line.
@@ -250,12 +326,18 @@ document.addEventListener('DOMContentLoaded', function () {
         btn.addEventListener('click', function () {
             var empId = btn.getAttribute('data-employee-id');
             var empName = btn.getAttribute('data-employee-name');
-            var empLine = parseInt(btn.getAttribute('data-employee-line'), 10);
+            var empLine = Number(btn.dataset.employeeLine);
+            if (!Number.isFinite(empLine)) {
+                // The data attribute may be empty for Excel-imported operators whose line
+                // lives only in the Allocation; resolve it from the injected employee data.
+                var empRec = findEmployeeRecord(empId);
+                empLine = (empRec && empRec.line_id !== null) ? empRec.line_id : NaN;
+            }
             if (isStaff) {
                 // Staff: pre-select the employee but keep both types/fields editable.
                 openTransferModal(empId, empName, 'PUSH', 'row', empLine);
             } else {
-                var inScope = DATA.scopeLineIds.indexOf(empLine) !== -1;
+                var inScope = isEmployeeLineInScope(empLine);
                 openTransferModal(empId, empName, inScope ? 'PUSH' : 'PULL', 'row', empLine);
             }
         });

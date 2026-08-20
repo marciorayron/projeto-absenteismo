@@ -11,6 +11,7 @@ from models.line import Line
 from models.leader_scope import LeaderScope
 from models.calendar import CompanyCalendar
 from services.excel_service import process_excel_upload, analyze_excel_upload, generate_absenteeism_report
+from services.absence_history_service import process_absence_history_upload, AbsenceImportError
 from services.metrics_service import calculate_shift_net_minutes
 from services.employee_service import migrate_employee_id
 from functools import wraps
@@ -92,6 +93,47 @@ def upload():
     """Excel upload page (two-step: analyze then confirm)."""
     summary = session.pop('upload_summary', None)
     return render_template('admin/upload.html', summary=summary)
+
+
+@admin_bp.route('/import/absence-history', methods=['POST'])
+@staff_required
+def import_absence_history():
+    """Import a historical absence Excel (.xlsx/.xls) file.
+
+    Non-destructive: existing employees are never modified, missing ones are
+    auto-created as inactive, and one ``Attendance`` record is stored per valid row.
+    Returns JSON when called via AJAX (the admin-home modal), otherwise flashes a
+    summary and redirects back to the admin home.
+    """
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    file = request.files.get('absence_history_file')
+
+    def _err_response(message):
+        if is_ajax:
+            return jsonify({'success': False, 'error': message}), 400
+        flash(message, 'danger')
+        return redirect(url_for('admin.admin_home'))
+
+    if file is None or not file.filename:
+        return _err_response('Nenhum arquivo enviado.')
+
+    try:
+        summary = process_absence_history_upload(file, file.filename, current_user.id)
+    except AbsenceImportError as exc:
+        return _err_response(str(exc))
+
+    summary['success'] = True
+    if is_ajax:
+        return jsonify(summary)
+
+    flash(
+        f"Importação concluída: {summary['attendances_created']} registro(s) de "
+        f"ausência criado(s), {summary['attendances_updated']} atualizado(s), "
+        f"{summary['employees_created']} funcionário(s) inativo(s) criado(s), "
+        f"{summary['skipped_rows']} linha(s) ignorada(s).",
+        'success',
+    )
+    return redirect(url_for('admin.admin_home'))
 
 
 def _upload_dir():

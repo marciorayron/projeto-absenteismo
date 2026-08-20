@@ -211,13 +211,21 @@ let totalPages = 1;
 const EVENT_LABELS = {
     'FULL_ABSENCE': 'Falta Integral',
     'LATE_ARRIVAL': 'Atraso',
-    'EARLY_EXIT': 'Saída Antecipada'
+    'EARLY_EXIT': 'Saída Antecipada',
+    'ATESTADO': 'Atestado',
+    'FALTA': 'Falta (importada)',
+    'SITUACAO_LEGAL': 'Situação Legal',
+    'SUSPENSAO': 'Suspensão'
 };
 
 const EVENT_COLORS = {
     'FULL_ABSENCE': '#dc3545',
     'LATE_ARRIVAL': '#ffc107',
-    'EARLY_EXIT': '#0dcaf0'
+    'EARLY_EXIT': '#0dcaf0',
+    'ATESTADO': '#0dcaf0',
+    'FALTA': '#dc3545',
+    'SITUACAO_LEGAL': '#ffc107',
+    'SUSPENSAO': '#6c757d'
 };
 
 document.getElementById('historyFilterForm').addEventListener('submit', function(e) {

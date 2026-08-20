@@ -51,9 +51,10 @@
     </div>
 </div>
 
-<!-- Quick actions -->
-<div class="row mb-4">
-    <div class="col-md-4 mb-3">
+<!-- Categoria 1: Importações e Cargas -->
+<h5 class="fw-bold mb-3 text-secondary d-flex align-items-center"><i class="bi bi-cloud-upload me-2"></i>Importações e Cargas</h5>
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
                 <i class="bi bi-cloud-upload display-4 text-primary"></i>
@@ -63,17 +64,25 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
-                <i class="bi bi-bar-chart display-4 text-success"></i>
-                <h5 class="mt-2">Dashboard Analítico</h5>
-                <p class="text-muted">Métricas de absenteísmo por linha, turno e projeto</p>
-                <a href="{{ url_for('dashboard.index') }}" class="btn btn-success">Acessar</a>
+                <i class="bi bi-calendar2-x display-4 text-warning"></i>
+                <h5 class="mt-2">Upload de Histórico de Absenteísmo</h5>
+                <p class="text-muted">Processar arquivo Excel com histórico de ausências do ano</p>
+                <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#modalAbsenceHistory">
+                    <i class="bi bi-upload"></i> Acessar
+                </button>
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+</div>
+<hr class="my-4 text-muted opacity-25">
+
+<!-- Categoria 2: Operação e Análise -->
+<h5 class="fw-bold mb-3 text-secondary d-flex align-items-center"><i class="bi bi-speedometer2 me-2"></i>Operação e Análise</h5>
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
                 <i class="bi bi-person-check display-4 text-info"></i>
@@ -83,11 +92,23 @@
             </div>
         </div>
     </div>
+    <div class="col-md-4">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-bar-chart display-4 text-success"></i>
+                <h5 class="mt-2">Dashboard Analítico</h5>
+                <p class="text-muted">Métricas de absenteísmo por linha, turno e projeto</p>
+                <a href="{{ url_for('dashboard.index') }}" class="btn btn-success">Acessar</a>
+            </div>
+        </div>
+    </div>
 </div>
+<hr class="my-4 text-muted opacity-25">
 
-<!-- User management, audit, and shifts -->
-<div class="row">
-    <div class="col-md-4 mb-3">
+<!-- Categoria 3: Gestão de Cadastros e Configurações -->
+<h5 class="fw-bold mb-3 text-secondary d-flex align-items-center"><i class="bi bi-sliders me-2"></i>Gestão de Cadastros e Configurações</h5>
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
                 <i class="bi bi-person-badge display-4 text-success"></i>
@@ -97,7 +118,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
                 <i class="bi bi-people display-4 text-warning"></i>
@@ -107,7 +128,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
                 <i class="bi bi-clock display-4 text-dark"></i>
@@ -117,7 +138,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
                 <i class="bi bi-diagram-3 display-4 text-primary"></i>
@@ -127,7 +148,23 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-4">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="bi bi-calendar3 display-4 text-success"></i>
+                <h5 class="mt-2">Calendário da Empresa</h5>
+                <p class="text-muted">Feriados, pontes e sábados letivos</p>
+                <a href="{{ url_for('admin.calendar') }}" class="btn btn-success">Acessar</a>
+            </div>
+        </div>
+    </div>
+</div>
+<hr class="my-4 text-muted opacity-25">
+
+<!-- Categoria 4: Sistema e Auditoria -->
+<h5 class="fw-bold mb-3 text-secondary d-flex align-items-center"><i class="bi bi-shield-check me-2"></i>Sistema e Auditoria</h5>
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
         <div class="card shadow">
             <div class="card-body text-center">
                 <i class="bi bi-journal-text display-4 text-danger"></i>
@@ -137,7 +174,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-4">
         <div class="card shadow {% if current_user.role == 'SUPERVISOR' %}opacity-50 pointer-events-none bg-gray-100 dark:bg-gray-800{% endif %}">
             <div class="card-body text-center">
                 <i class="bi bi-database display-4 text-secondary"></i>
@@ -151,15 +188,98 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
-        <div class="card shadow">
-            <div class="card-body text-center">
-                <i class="bi bi-calendar3 display-4 text-success"></i>
-                <h5 class="mt-2">Calendário da Empresa</h5>
-                <p class="text-muted">Feriados, pontes e sábados letivos</p>
-                <a href="{{ url_for('admin.calendar') }}" class="btn btn-success">Acessar</a>
+</div>
+
+<!-- Modal: Upload de Histórico de Absenteísmo -->
+<div class="modal fade" id="modalAbsenceHistory" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-calendar2-x"></i> Upload de Histórico de Absenteísmo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Processar arquivo Excel (.xlsx / .xls) com o histórico de ausências do ano.</p>
+                <div class="alert alert-info py-2 small">
+                    Colunas obrigatórias: <code>Data</code>, <code>Matricula</code>, <code>Tipo de Ausência</code>.
+                    Opcionais: <code>Linha</code>, <code>Projeto</code>.<br>
+                    Tipos aceitos: Atestado, Falta, Situação Legal, Suspensão.
+                </div>
+                <form id="absenceHistoryForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="absenceHistoryFile" class="form-label">Arquivo Excel</label>
+                        <input type="file" class="form-control" id="absenceHistoryFile" name="absence_history_file"
+                               accept=".xlsx,.xls" required>
+                    </div>
+                    <div id="absenceHistoryResult" class="d-none">
+                        <div class="alert alert-success py-2 small d-none" id="absenceHistoryOk"></div>
+                        <div class="alert alert-danger py-2 small d-none" id="absenceHistoryErr"></div>
+                    </div>
+                    <button type="submit" class="btn btn-warning" id="absenceHistorySubmit">
+                        <i class="bi bi-cloud-upload"></i> Importar
+                    </button>
+                </form>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var form = document.getElementById('absenceHistoryForm');
+    if (!form) return;
+
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var fileInput = document.getElementById('absenceHistoryFile');
+        var resultBox = document.getElementById('absenceHistoryResult');
+        var okBox = document.getElementById('absenceHistoryOk');
+        var errBox = document.getElementById('absenceHistoryErr');
+        var submitBtn = document.getElementById('absenceHistorySubmit');
+
+        if (!fileInput || !fileInput.files || !fileInput.files.length) {
+            alert('Selecione um arquivo Excel.');
+            return;
+        }
+
+        var fd = new FormData();
+        fd.append('absence_history_file', fileInput.files[0]);
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+            var res = await fetch('/admin/import/absence-history', {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: fd
+            });
+            var data = await res.json();
+            resultBox.classList.remove('d-none');
+
+            if (res.ok && data.success) {
+                okBox.classList.remove('d-none');
+                errBox.classList.add('d-none');
+                okBox.innerHTML =
+                    '<strong>Importação concluída!</strong><br>' +
+                    'Registros de ausência criados: <strong>' + data.attendances_created + '</strong><br>' +
+                    'Atualizados: <strong>' + data.attendances_updated + '</strong><br>' +
+                    'Funcionários inativos criados: <strong>' + data.employees_created + '</strong><br>' +
+                    'Linhas ignoradas: <strong>' + data.skipped_rows + '</strong>';
+            } else {
+                okBox.classList.add('d-none');
+                errBox.classList.remove('d-none');
+                errBox.textContent = data.error || 'Erro ao importar o arquivo.';
+            }
+        } catch (err) {
+            resultBox.classList.remove('d-none');
+            okBox.classList.add('d-none');
+            errBox.classList.remove('d-none');
+            errBox.textContent = 'Erro de conexão ao importar o arquivo.';
+        } finally {
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    });
+});
+</script>
 {% endblock %}

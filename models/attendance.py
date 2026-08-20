@@ -18,6 +18,8 @@ class Attendance(db.Model):
     minutes_lost = db.Column(db.Integer, default=0)
     registered_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     justification_type = db.Column(db.String(20), nullable=True)  # 'JUSTIFIED' | 'UNJUSTIFIED'
+    is_justified = db.Column(db.Boolean, nullable=True)           # True for justified absences
+    status = db.Column(db.String(20), nullable=True)              # e.g. 'ABSENT' / 'PRESENT'
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
@@ -35,6 +37,8 @@ class Attendance(db.Model):
             'minutes_lost': self.minutes_lost,
             'registered_by_id': self.registered_by_id,
             'justification_type': self.justification_type,
+            'is_justified': self.is_justified,
+            'status': self.status,
             'notes': self.notes,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

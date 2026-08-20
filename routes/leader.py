@@ -86,6 +86,82 @@ def _is_month_frozen(record_date):
 MONTH_FREEZE_MESSAGE = 'Registros de meses anteriores estão congelados. Contate um Administrador.'
 
 
+def _scope_employees_orm(scope_line_ids):
+    """Active employees whose resolved line is in the leader's scope (ORM objects).
+
+    An operator's current line can be stored only in the active Allocation
+    (Excel-imported rows may have ``Employee.line_id = NULL``), so this falls back
+    to the Allocation/Line mapping when the FK is empty and reflects the resolved
+    ``line_id`` on the ORM object so the view/payload agree with the real line.
+    """
+    line_ids = set(scope_line_ids or ())
+    if not line_ids:
+        return []
+    result = []
+    seen = set()
+
+    # 1. Direct FK match.
+    direct = Employee.query.filter(
+        Employee.is_active.is_(True),
+        Employee.line_id.in_(line_ids),
+    ).order_by(Employee.name).all()
+    for e in direct:
+        result.append(e)
+        seen.add(e.id)
+
+    # 2. Allocation fallback for operators whose Employee FK is empty.
+    rows = db.session.query(Allocation, Line).join(
+        Line, (Line.name == Allocation.line) & (Line.project == Allocation.project),
+    ).filter(
+        Allocation.end_date.is_(None),
+        Allocation.line.isnot(None),
+        Allocation.line != '',
+        Line.id.in_(line_ids),
+    ).all()
+    for alloc, line in rows:
+        if alloc.employee_id in seen:
+            continue
+        emp = Employee.query.filter_by(id=alloc.employee_id, is_active=True).first()
+        if emp:
+            emp.line_id = line.id  # reflect resolved line for the view/payload
+            result.append(emp)
+            seen.add(emp.id)
+
+    result.sort(key=lambda e: e.name)
+    return result
+
+
+def _scope_employees_payload(scope_line_ids):
+    """Like :func:`_scope_employees_orm` but returns dicts without mutating ORM rows."""
+    line_ids = set(scope_line_ids or ())
+    payload = {}
+    if not line_ids:
+        return []
+
+    for e in Employee.query.filter(
+            Employee.is_active.is_(True),
+            Employee.line_id.in_(line_ids),
+    ).all():
+        payload[e.id] = {'employee_id': e.id, 'name': e.name, 'line_id': e.line_id}
+
+    rows = db.session.query(Allocation, Line).join(
+        Line, (Line.name == Allocation.line) & (Line.project == Allocation.project),
+    ).filter(
+        Allocation.end_date.is_(None),
+        Allocation.line.isnot(None),
+        Allocation.line != '',
+        Line.id.in_(line_ids),
+    ).all()
+    for alloc, line in rows:
+        if alloc.employee_id in payload:
+            continue
+        emp = Employee.query.filter_by(id=alloc.employee_id, is_active=True).first()
+        if emp:
+            payload[emp.id] = {'employee_id': emp.id, 'name': emp.name, 'line_id': line.id}
+
+    return sorted(payload.values(), key=lambda d: d['name'])
+
+
 @leader_bp.route('/')
 @login_required
 def index():
@@ -271,30 +347,51 @@ def index():
             'description': calendar_entry.description
         }
 
-    # Transfer request modal data (employees restricted to the leader's scope)
+    # Backfill Employee.line_id from the active Allocation so the row transfer
+    # button can resolve an operator's line even when the FK is empty (Excel-imported).
+    line_ref_cache = {}
+    for _item in employee_list:
+        _emp = _item.get('employee')
+        if _emp is None or _emp.line_id is not None:
+            continue
+        _alloc = _item.get('allocation')
+        if _alloc is None or not _alloc.line:
+            continue
+        _key = (_alloc.line, _alloc.project or '')
+        _line = line_ref_cache.get(_key)
+        if _line is None:
+            _line = Line.query.filter_by(name=_key[0], project=_key[1]).first()
+            line_ref_cache[_key] = _line
+        if _line:
+            _emp.line_id = _line.id
+
+    # Transfer request modal data (employees restricted to the leader's scope).
+    # An operator's current line may live only in the active Allocation (Excel-imported
+    # rows can have Employee.line_id = NULL), so scope resolution falls back to the
+    # Allocation — otherwise scoped operators would be invisible to the modal and be
+    # forced into "Receber".
     if current_user.role == 'LIDER':
         scope_line_ids = {s.line_id for s in current_user.managed_scopes if s.line_id}
-        if scope_line_ids:
-            transfer_employees = Employee.query.filter(
-                Employee.is_active.is_(True),
-                Employee.line_id.in_(scope_line_ids)
-            ).order_by(Employee.name).all()
-        else:
-            transfer_employees = []
+        transfer_employees = _scope_employees_orm(scope_line_ids)
     else:
         scope_line_ids = set()
         transfer_employees = Employee.query.filter_by(is_active=True).order_by(Employee.name).all()
     transfer_lines = Line.query.filter_by(is_active=True).order_by(Line.project, Line.name).all()
     transfer_shifts = Shift.query.filter_by(is_active=True).order_by(Shift.id).all()
 
-    # JSON blob consumed by transfers.js to drive the PUSH/PULL dynamic state.
+    # Serialized payloads consumed by transfers.js (window.TRANSFER_DATA).
     transfer_all_employees = Employee.query.filter_by(is_active=True).order_by(Employee.name).all()
+    scope_employees = [{'id': e.id, 'name': e.name, 'line_id': e.line_id} for e in transfer_employees]
+    all_employees = [{'id': e.id, 'name': e.name, 'line_id': e.line_id} for e in transfer_all_employees]
+    lines_json = [{'id': l.id, 'project': l.project, 'name': l.name} for l in transfer_lines]
+    is_staff = current_user.role in ('ADMIN', 'SUPERVISOR')
     transfer_data = {
-        'scopeEmployees': [{'id': e.id, 'name': e.name} for e in transfer_employees],
-        'allEmployees': [{'id': e.id, 'name': e.name} for e in transfer_all_employees],
-        'lines': [{'id': l.id, 'project': l.project, 'name': l.name} for l in transfer_lines],
+        'scopeEmployees': scope_employees,
+        'allEmployees': all_employees,
+        'lines': lines_json,
         'scopeLineIds': sorted(scope_line_ids),
-        'isStaff': current_user.role in ('ADMIN', 'SUPERVISOR'),
+        'isStaff': is_staff,
+        'currentUserId': current_user.id,
     }
 
     return render_template(
@@ -326,6 +423,11 @@ def index():
         transfer_lines=transfer_lines,
         transfer_shifts=transfer_shifts,
         transfer_data=transfer_data,
+        scope_line_ids=sorted(scope_line_ids),
+        scope_employees=scope_employees,
+        all_employees=all_employees,
+        lines_json=lines_json,
+        is_staff=is_staff,
     )
 
 
@@ -477,6 +579,9 @@ def api_quick_action():
     justification_raw = data.get('justification_type')
     justification_type = justification_raw.strip() if isinstance(justification_raw, str) and justification_raw.strip() else None
 
+    is_justified = data.get('is_justified')
+    status = data.get('status')
+
     if not employee_id or not record_date_str or not event_type:
         return jsonify({'success': False, 'error': 'Dados obrigatórios ausentes.'}), 400
 
@@ -518,9 +623,21 @@ def api_quick_action():
     if event_type in ('FULL_ABSENCE', 'LATE_ARRIVAL', 'EARLY_EXIT') and _is_off_day(alloc.shift, record_date):
         return jsonify({'success': False, 'error': 'Operação bloqueada: Esta data é um dia de folga do turno.'}), 400
 
-    effective_type, minutes_lost = calculate_lost_minutes(
-        alloc.shift, event_type, check_in_time, check_out_time, current_app.config
-    )
+    if event_type in ('ATESTADO', 'SUSPENSAO', 'SITUACAO_LEGAL', 'FALTA'):
+        # Full-absence justification types: count as a full shift's net work minutes.
+        shift_def = Shift.query.get(alloc.shift)
+        effective_type = event_type
+        minutes_lost = shift_def.net_work_minutes if shift_def else 488
+    else:
+        effective_type, minutes_lost = calculate_lost_minutes(
+            alloc.shift, event_type, check_in_time, check_out_time, current_app.config
+        )
+
+    # Derive a status if the caller did not provide one.
+    if status is None:
+        status = ('ABSENT' if effective_type in ('FULL_ABSENCE', 'ATESTADO', 'SUSPENSAO',
+                                                 'SITUACAO_LEGAL', 'FALTA')
+                  else ('PRESENT' if effective_type == 'PRESENT' else None))
 
     existing = Attendance.query.filter_by(
         employee_id=employee_id,
@@ -535,6 +652,8 @@ def api_quick_action():
         existing.minutes_lost = minutes_lost
         existing.registered_by_id = current_user.id
         existing.justification_type = justification_type
+        existing.is_justified = is_justified
+        existing.status = status
         existing.notes = notes
 
         db.session.add(AuditLog(
@@ -556,6 +675,8 @@ def api_quick_action():
             minutes_lost=minutes_lost,
             registered_by_id=current_user.id,
             justification_type=justification_type,
+            is_justified=is_justified,
+            status=status,
             notes=notes
         )
         db.session.add(attendance)
@@ -821,17 +942,10 @@ def api_employees_scope():
     """
     if current_user.role == 'LIDER':
         scope_line_ids = {s.line_id for s in current_user.managed_scopes if s.line_id}
-        if scope_line_ids:
-            query = Employee.query.filter(
-                Employee.is_active.is_(True),
-                Employee.line_id.in_(scope_line_ids)
-            ).order_by(Employee.name)
-        else:
-            query = Employee.query.filter(db.false())
+        result = _scope_employees_payload(scope_line_ids)
     else:
-        query = Employee.query.filter_by(is_active=True).order_by(Employee.name)
-
-    result = [{'employee_id': e.id, 'name': e.name} for e in query.all()]
+        result = [{'employee_id': e.id, 'name': e.name, 'line_id': e.line_id}
+                  for e in Employee.query.filter_by(is_active=True).order_by(Employee.name).all()]
     return jsonify({'employees': result})
     """Get existing attendance record for an employee on a specific date."""
     try:
@@ -866,6 +980,7 @@ def get_employee_bradford(employee_id):
 
 
 # ─────────────────── QUICK HISTORY MODAL ───────────────────
+
 
 @leader_bp.route('/api/employee-quick-history/<employee_id>', methods=['GET'])
 @login_required
@@ -1075,6 +1190,14 @@ def _render_status_badge(attendance):
         badge = '<span class="badge bg-warning">Atraso</span>'
     elif event_type == 'EARLY_EXIT':
         badge = '<span class="badge bg-info">Saída Antecipada</span>'
+    elif event_type == 'FALTA':
+        badge = '<span class="badge bg-danger">Falta</span>'
+    elif event_type == 'ATESTADO':
+        badge = '<span class="badge bg-info">Atestado</span>'
+    elif event_type == 'SUSPENSAO':
+        badge = '<span class="badge bg-dark">Suspensão</span>'
+    elif event_type == 'SITUACAO_LEGAL':
+        badge = '<span class="badge bg-warning">Situação Legal</span>'
     else:
         badge = f'<span class="badge bg-secondary">{event_type}</span>'
 

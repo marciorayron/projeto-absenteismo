@@ -8,3 +8,7 @@ openpyxl>=3.1,<4.0
 python-dotenv>=1.0,<2.0
 waitress>=3.0,<4.0
 holidays>=0.40
+xlrd>=2.0,<3.0
+
+# Development / test
+pytest>=8.0,<9.0

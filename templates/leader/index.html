@@ -318,9 +318,18 @@
                 <div class="mb-3">
                     <label class="form-label">Tipo de Justificativa <span class="text-danger">*</span></label>
                     <select class="form-select" id="faltaJustification" required>
-                        <option value="">Selecione...</option>
+                        <option value="">Seleccione...</option>
                         <option value="JUSTIFIED">Justificada</option>
                         <option value="UNJUSTIFIED">Injustificada</option>
+                    </select>
+                </div>
+                <div class="mb-3 d-none" id="faltaReasonGroup">
+                    <label class="form-label">Motivo da Justificativa <span class="text-danger">*</span></label>
+                    <select class="form-select" id="faltaReason">
+                        <option value="">Seleccione...</option>
+                        <option value="ATESTADO">Atestado</option>
+                        <option value="SUSPENSAO">Suspensão</option>
+                        <option value="SITUACAO_LEGAL">Situação Legal</option>
                     </select>
                 </div>
                 <div class="mb-3">
@@ -619,17 +628,50 @@ document.addEventListener('DOMContentLoaded', function() {
         bootstrap.Modal.getInstance(document.getElementById('exitModal')).hide();
     });
 
+    // Show/hide the justified-reason selector based on the justification type.
+    const faltaJust = document.getElementById('faltaJustification');
+    const faltaReasonGroup = document.getElementById('faltaReasonGroup');
+    const faltaReason = document.getElementById('faltaReason');
+    if (faltaJust) {
+        faltaJust.addEventListener('change', function () {
+            if (this.value === 'JUSTIFIED') {
+                faltaReasonGroup.classList.remove('d-none');
+                faltaReason.required = true;
+            } else {
+                faltaReasonGroup.classList.add('d-none');
+                faltaReason.required = false;
+                faltaReason.value = '';
+            }
+        });
+    }
+
     // Confirm Falta button
     document.getElementById('confirmFalta').addEventListener('click', function() {
         const employeeId = document.getElementById('faltaEmployeeId').value;
         const justificationType = document.getElementById('faltaJustification').value;
         const notes = document.getElementById('faltaNotes').value.trim();
         if (!justificationType) {
-            alert('Selecione o tipo de justificativa.');
+            alert('Seleccione o tipo de justificativa.');
             return;
         }
+
+        let eventType;
+        let isJustified;
+        if (justificationType === 'JUSTIFIED') {
+            const reason = faltaReason ? faltaReason.value : '';
+            if (!reason) {
+                alert('Seleccione o motivo da justificativa (Atestado, Suspensão ou Legal).');
+                return;
+            }
+            eventType = reason; // ATESTADO | SUSPENSAO | SITUACAO_LEGAL
+            isJustified = true;
+        } else {
+            eventType = 'FALTA';
+            isJustified = false;
+        }
+
         const row = document.getElementById('modalFalta')._row;
-        quickAction(employeeId, 'FULL_ABSENCE', '', '', row, justificationType, notes);
+        quickAction(employeeId, eventType, '', '', row, justificationType, notes, isJustified);
         bootstrap.Modal.getInstance(document.getElementById('modalFalta')).hide();
     });
 
@@ -685,7 +727,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    async function quickAction(employeeId, eventType, checkIn, checkOut, row, justificationType, notes) {
+    async function quickAction(employeeId, eventType, checkIn, checkOut, row, justificationType, notes, isJustified) {
         try {
             const res = await fetch('/leader/api/quick-action', {
                 method: 'POST',
@@ -697,6 +739,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     check_in: checkIn,
                     check_out: checkOut,
                     justification_type: justificationType || null,
+                    is_justified: (typeof isJustified === 'boolean') ? isJustified : null,
                     notes: notes || null
                 })
             });
@@ -810,12 +853,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     const labels = {
                         'FULL_ABSENCE': 'Falta',
                         'LATE_ARRIVAL': 'Atraso',
-                        'EARLY_EXIT': 'Saída Antecipada'
+                        'EARLY_EXIT': 'Saída Antecipada',
+                        'ATESTADO': 'Atestado',
+                        'FALTA': 'Falta (importada)',
+                        'SITUACAO_LEGAL': 'Situação Legal',
+                        'SUSPENSAO': 'Suspensão'
                     };
                     const colors = {
                         'FULL_ABSENCE': '#dc3545',
                         'LATE_ARRIVAL': '#ffc107',
-                        'EARLY_EXIT': '#0dcaf0'
+                        'EARLY_EXIT': '#0dcaf0',
+                        'ATESTADO': '#0dcaf0',
+                        'FALTA': '#dc3545',
+                        'SITUACAO_LEGAL': '#ffc107',
+                        'SUSPENSAO': '#6c757d'
                     };
 
                     records.forEach(r => {
@@ -889,7 +940,16 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script src="{{ url_for('static', filename='js/leader.js') }}"></script>
-    <script id="transferData" type="application/json">{{ transfer_data | tojson }}</script>
+    <script>
+        window.TRANSFER_DATA = {
+            scopeLineIds: {{ scope_line_ids | tojson | safe if scope_line_ids else [] }},
+            scopeEmployees: {{ scope_employees | tojson | safe if scope_employees else [] }},
+            allEmployees: {{ all_employees | tojson | safe if all_employees else [] }},
+            lines: {{ lines_json | tojson | safe if lines_json else [] }},
+            isStaff: {{ 'true' if is_staff else 'false' }},
+            currentUserId: {{ current_user.id }}
+        };
+    </script>
 
     <script src="{{ url_for('static', filename='js/transfers.js') }}"></script>
 

@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app, abort
 from flask_login import login_required, current_user
 from extensions import db
 from models.employee import Employee
@@ -299,8 +299,10 @@ def respond(transfer_id):
         return redirect(url_for('transfer.index'))
 
     if not _can_respond(request_obj):
-        flash('Você não tem permissão para responder a esta solicitação.', 'danger')
-        return redirect(url_for('transfer.index'))
+        # Security guard: a requester can never respond to their own request, and only
+        # the designated approver (or staff) may act. Return 403 instead of silently
+        # redirecting so the block is enforced at the protocol level too.
+        abort(403)
 
     decision = request.form.get('decision', '').strip().upper()
     if decision == 'APPROVE':

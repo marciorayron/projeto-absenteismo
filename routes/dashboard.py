@@ -556,7 +556,7 @@ def api_daily_trend():
     trend_rows = trend_query.group_by(Attendance.record_date).order_by(Attendance.record_date).all()
 
     # Build ordered result, filling gaps for dates with no data
-    trend_map = {row[0]: (row[1] or 0, row[2] or 0) for row in trend_rows}
+    trend_map = {row[0]: [row[1] or 0, row[2] or 0] for row in trend_rows}
 
     dates = []
     absent_counts = []
@@ -596,11 +596,15 @@ def api_top_absentees():
     if _has_filters(shifts, projects, lines):
         emp_ids = _get_filtered_emp_ids(shifts, projects, lines)
 
-    # Distinct absence days per employee (exclude PRESENT and VACATION).
-    query = db.session.query(Attendance.employee_id, Attendance.record_date).filter(
+    # Distinct absence days per employee (exclude PRESENT and VACATION), restricted
+    # to ACTIVE employees so inactive (e.g. auto-created import) operators never rank.
+    query = db.session.query(Attendance.employee_id, Attendance.record_date).join(
+        Employee, Employee.id == Attendance.employee_id
+    ).filter(
         Attendance.record_date >= start,
         Attendance.record_date <= end,
-        Attendance.event_type.notin_(['PRESENT', 'VACATION'])
+        Attendance.event_type.notin_(['PRESENT', 'VACATION']),
+        Employee.is_active.is_(True),
     ).distinct()
     if emp_ids is not None:
         query = query.filter(Attendance.employee_id.in_(emp_ids))
@@ -613,6 +617,9 @@ def api_top_absentees():
 
     result = []
     for emp_id, date_set in days_by_emp.items():
+        emp = Employee.query.get(emp_id)
+        if emp is None or not emp.is_active:
+            continue  # strictly exclude inactive employees from the ranking
         dates = sorted(date_set)
         occurrences = 1 if dates else 0
         for i in range(1, len(dates)):
@@ -621,8 +628,7 @@ def api_top_absentees():
         total_days = len(dates)
         bradford = (occurrences ** 2) * total_days
 
-        emp = Employee.query.get(emp_id)
-        alloc = emp.get_active_allocation() if emp else None
+        alloc = emp.get_active_allocation()
         result.append({
             'employee_id': emp_id,
             'name': emp.name if emp else emp_id,
@@ -652,26 +658,25 @@ def api_by_day_of_week():
     if _has_filters(shifts, projects, lines):
         emp_ids = _get_filtered_emp_ids(shifts, projects, lines)
 
-    query = db.session.query(
-        db.func.strftime('%w', Attendance.record_date).label('dow'),
-        db.func.count(db.distinct(
-            db.func.concat(Attendance.employee_id, '|', Attendance.record_date)
-        )).label('cnt')
-    ).filter(
+    # Compute weekdays in Python from the local date objects to avoid any UTC/strftime
+    # off-by-one. Python's date.weekday() returns Monday=0, so map to Sunday=0 via
+    # (weekday + 1) % 7 to match the labels below.
+    counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
+
+    att_query = db.session.query(
+        Attendance.employee_id, Attendance.record_date
+    ).distinct().filter(
         Attendance.record_date >= start,
         Attendance.record_date <= end,
         Attendance.event_type.notin_(['PRESENT', 'VACATION'])
     )
     if emp_ids is not None:
-        query = query.filter(Attendance.employee_id.in_(emp_ids))
+        att_query = att_query.filter(Attendance.employee_id.in_(emp_ids))
     if exclusion_dates:
-        query = query.filter(Attendance.record_date.notin_(exclusion_dates))
+        att_query = att_query.filter(Attendance.record_date.notin_(exclusion_dates))
 
-    rows = query.group_by('dow').all()
-    counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
-    for dow, cnt in rows:
-        if dow is not None:
-            counts[int(dow)] = cnt or 0
+    for _emp_id, rec_date in att_query.all():
+        counts[(rec_date.weekday() + 1) % 7] += 1
 
     labels = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
     return jsonify({'days': labels, 'counts': [counts[i] for i in range(7)]})
@@ -683,7 +688,7 @@ def api_by_day_of_week():
 @login_required
 def api_bradford_top_risks():
     """Return employees with high Bradford Factor scores using bulk SQL computation."""
-    active_employees = Employee.query.filter_by(status='ACTIVE').all()
+    active_employees = Employee.query.filter(Employee.is_active.is_(True)).all()
     if not active_employees:
         return jsonify({'risks': []})
 
