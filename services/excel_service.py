@@ -288,20 +288,40 @@ def process_excel_upload(file_path, user_id=None):
         if action == 'created':
             created_lines.append(canonical_line)
 
-        # Upsert employee
+        # Upsert employee — Employee is the source of truth for base line/shift.
         employee = Employee.query.get(emp_id)
         if employee:
-            # Update name if changed
+            # Capture prior values for the audit trail.
+            old_name = employee.name
+            old_line_id = employee.line_id
+            old_shift_id = employee.shift_id
+            changed = False
+
+            # Update name if changed.
             if employee.name != name:
-                old_value = {'name': employee.name}
                 employee.name = name
-                new_value = {'name': name}
+                changed = True
+
+            # Update base line/shift assignment directly on the Employee record
+            # (not only on the Allocation) so the admin UI shows them for imports.
+            if line_obj.id is not None and employee.line_id != line_obj.id:
+                employee.line_id = line_obj.id
+                changed = True
+            if shift and employee.shift_id != shift:
+                employee.shift_id = shift
+                changed = True
+
+            if changed:
                 updated_count += 1
                 db.session.add(AuditLog(
                     user_id=user_id or 1,
                     action='EMPLOYEE_UPDATE',
-                    old_value=old_value,
-                    new_value=new_value
+                    old_value={'name': old_name,
+                               'line_id': old_line_id,
+                               'shift_id': old_shift_id},
+                    new_value={'name': name,
+                               'line_id': employee.line_id,
+                               'shift_id': employee.shift_id}
                 ))
         else:
             # Matricula typo guard: don't create a duplicate if the name already
@@ -316,7 +336,11 @@ def process_excel_upload(file_path, user_id=None):
                 )
                 continue
 
-            employee = Employee(id=emp_id, name=name)
+            employee = Employee(
+                id=emp_id, name=name,
+                line_id=line_obj.id,
+                shift_id=(shift if shift else None),
+            )
             db.session.add(employee)
             db.session.flush()  # Flush to ensure employee is persisted
             inserted_count += 1

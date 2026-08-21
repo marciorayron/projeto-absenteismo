@@ -99,7 +99,6 @@
                     <th>Turno</th>
                     <th>Projeto</th>
                     <th>Status</th>
-                    <th style="min-width: 300px;">Férias</th>
                     <th>Ações</th>
                 </tr>
             </thead>
@@ -117,14 +116,6 @@
                         {% else %}
                         <span class="badge bg-secondary">Inativo</span>
                         {% endif %}
-                    </td>
-                    <td>
-                        <form method="POST" action="{{ url_for('admin.employee_vacation', employee_id=emp.id) }}" class="d-flex align-items-center gap-2 flex-wrap">
-                            <input type="date" class="form-control form-control-sm" name="vacation_start" value="{{ emp.vacation_start.isoformat() if emp.vacation_start else '' }}" style="max-width: 140px;">
-                            <span class="text-muted">até</span>
-                            <input type="date" class="form-control form-control-sm" name="vacation_end" value="{{ emp.vacation_end.isoformat() if emp.vacation_end else '' }}" style="max-width: 140px;">
-                            <button type="submit" class="btn btn-sm btn-primary">Salvar</button>
-                        </form>
                     </td>
                     <td>
                         <div class="d-flex gap-1 flex-wrap">

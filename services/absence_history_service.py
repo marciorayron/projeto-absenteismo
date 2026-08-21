@@ -17,6 +17,7 @@ from extensions import db
 from models.employee import Employee
 from models.allocation import Allocation
 from models.attendance import Attendance
+from models.shift import Shift
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,26 @@ def _map_absence_type(raw):
             if alias in key:
                 return canonical
     return None
+
+DEFAULT_NET_WORK_MINUTES = 480
+
+
+def _net_shift_minutes(alloc):
+    """Return the net working minutes for an allocation's shift.
+
+    Falls back to 480 minutes (8h) when the allocation is missing or its shift
+    has no ``net_work_minutes`` defined, so imported absences never stay zeroed.
+    """
+    if alloc is None:
+        return DEFAULT_NET_WORK_MINUTES
+    try:
+        shift_id = int(alloc.shift)
+    except (TypeError, ValueError):
+        return DEFAULT_NET_WORK_MINUTES
+    shift_def = Shift.query.get(shift_id)
+    if shift_def is not None and shift_def.net_work_minutes:
+        return int(shift_def.net_work_minutes)
+    return DEFAULT_NET_WORK_MINUTES
 
 
 def _matricula_str(value):
@@ -269,6 +290,10 @@ def process_absence_history_upload(file_stream, filename, registered_by_id=None)
 
         justification_type = 'JUSTIFIED' if is_justified else 'UNJUSTIFIED'
 
+        # Assign the employee's net shift minutes (8h fallback) so imported
+        # absences are never left with minutes_lost = 0.
+        minutes_lost = _net_shift_minutes(alloc)
+
         existing = Attendance.query.filter_by(
             employee_id=matricula, record_date=absence_date).first()
         if existing:
@@ -278,6 +303,7 @@ def process_absence_history_upload(file_stream, filename, registered_by_id=None)
             existing.allocation_id = alloc.id
             existing.justification_type = justification_type
             existing.notes = notes
+            existing.minutes_lost = minutes_lost
             summary['attendances_updated'] += 1
         else:
             db.session.add(Attendance(
@@ -285,7 +311,7 @@ def process_absence_history_upload(file_stream, filename, registered_by_id=None)
                 employee_id=matricula,
                 allocation_id=alloc.id,
                 event_type=event_type,
-                minutes_lost=0,
+                minutes_lost=minutes_lost,
                 registered_by_id=registered_by_id,
                 justification_type=justification_type,
                 is_justified=is_justified,
@@ -302,4 +328,34 @@ def process_absence_history_upload(file_stream, filename, registered_by_id=None)
         summary['employees_created'],
     )
     return summary
+
+
+
+def backfill_minutes_lost():
+    """Recalculate ``minutes_lost`` for ABSENT records that are still zeroed.
+
+    One-time utility targeting Attendance rows with ``status='ABSENT'`` whose
+    ``minutes_lost`` is NULL or 0 (typical of records imported before the minutes
+    calculation was introduced). Each row is updated to its allocation's net
+    shift minutes (8h fallback). Returns the number of records updated.
+    """
+    from sqlalchemy import or_
+
+    candidates = Attendance.query.filter(
+        Attendance.status == 'ABSENT',
+        or_(Attendance.minutes_lost.is_(None), Attendance.minutes_lost == 0)
+    ).all()
+
+    updated = 0
+    for att in candidates:
+        alloc = Allocation.query.get(att.allocation_id)
+        net = _net_shift_minutes(alloc)
+        if (att.minutes_lost or 0) != net:
+            att.minutes_lost = net
+            updated += 1
+
+    if updated:
+        db.session.commit()
+        logger.info('Backfill minutes_lost: %d records updated.', updated)
+    return updated
 

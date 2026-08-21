@@ -87,6 +87,20 @@ def admin_home():
     return render_template('admin/admin_home.html', stats=stats)
 
 
+@admin_bp.route('/attendance/backfill-minutes-lost', methods=['POST'])
+@admin_required
+def backfill_minutes_lost():
+    """Recalculate ``minutes_lost`` for ABSENT records that are still zeroed.
+
+    One-time administrative utility: updates every Attendance row with
+    ``status='ABSENT'`` whose ``minutes_lost`` is NULL or 0 to the employee's
+    allocation net shift minutes (8h fallback). Returns the number updated.
+    """
+    from services.absence_history_service import backfill_minutes_lost as _run_backfill
+    updated = _run_backfill()
+    return jsonify({'success': True, 'updated': updated})
+
+
 @admin_bp.route('/upload', methods=['GET'])
 @staff_required
 def upload():
@@ -1168,52 +1182,6 @@ def employee_toggle_status(employee_id):
     else:
         flash(f'Funcionário {emp.name} inativado. O histórico de apontamentos foi preservado.', 'info')
     return redirect(url_for('admin.employees'))
-
-
-
-@admin_bp.route('/employees/<employee_id>/vacation', methods=['POST'])
-@staff_required
-def employee_vacation(employee_id):
-    """Set or clear an employee's vacation period."""
-    emp = Employee.query.get_or_404(employee_id)
-
-    vacation_start = request.form.get('vacation_start', '').strip()
-    vacation_end = request.form.get('vacation_end', '').strip()
-
-    def _parse_date(value):
-        if not value:
-            return None
-        try:
-            return datetime.strptime(value, '%Y-%m-%d').date()
-        except ValueError:
-            return False
-
-    start = _parse_date(vacation_start)
-    end = _parse_date(vacation_end)
-
-    back = url_for('admin.employees', search=request.args.get('search', ''))
-
-    if start is False or end is False:
-        flash('Data inválida. Use o formato AAAA-MM-DD.', 'danger')
-        return redirect(back)
-
-    if (start and not end) or (end and not start):
-        flash('Informe ambas as datas (início e fim) ou deixe ambas vazias para limpar.', 'warning')
-        return redirect(back)
-
-    if start and end and start > end:
-        flash('A data de início não pode ser posterior à data de fim.', 'danger')
-        return redirect(back)
-
-    emp.vacation_start = start
-    emp.vacation_end = end
-    db.session.commit()
-
-    if start and end:
-        flash(f'Férias de {emp.name} definidas de {start} a {end}.', 'success')
-    else:
-        flash(f'Período de férias de {emp.name} removido.', 'success')
-    return redirect(back)
 
 
 @admin_bp.route('/employees/<employee_id>/migrate-id', methods=['POST'])

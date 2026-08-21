@@ -12,7 +12,11 @@ from models.user import User
 from models.shift import Shift
 from models.line import Line
 from models.calendar import CompanyCalendar
-from services.metrics_service import calculate_lost_minutes, calculate_bradford_factor
+from services.metrics_service import (
+    calculate_lost_minutes, calculate_bradford_factor,
+    ABSENCE_CATEGORY_FULL, ABSENCE_CATEGORY_MEDICAL, ABSENCE_CATEGORY_LATE,
+    ABSENCE_CATEGORY_EARLY, ABSENCE_CATEGORY_ABSENT,
+)
 from datetime import date, datetime, time as dt_time, timedelta
 from collections import defaultdict
 
@@ -1111,9 +1115,20 @@ def api_employee_history_data(employee_id):
         total_lost_minutes = total_lost_minutes.filter(Attendance.event_type == event_type_filter)
     total_lost_minutes = total_lost_minutes.scalar() or 0
 
-    count_absence = base_query.filter(Attendance.event_type == 'FULL_ABSENCE').count()
-    count_delay = base_query.filter(Attendance.event_type == 'LATE_ARRIVAL').count()
-    count_exit = base_query.filter(Attendance.event_type == 'EARLY_EXIT').count()
+    # Chart slices (distribution of absence types): full / medical / late / early.
+    count_faltas_integrais = base_query.filter(
+        Attendance.event_type.in_(ABSENCE_CATEGORY_FULL)).count()
+    count_atestados = base_query.filter(
+        Attendance.event_type.in_(ABSENCE_CATEGORY_MEDICAL)).count()
+    count_delay = base_query.filter(
+        Attendance.event_type.in_(ABSENCE_CATEGORY_LATE)).count()
+    count_exit = base_query.filter(
+        Attendance.event_type.in_(ABSENCE_CATEGORY_EARLY)).count()
+    # "Faltas" no card: status='ABSENT' OU tipos de Falta/Atestado.
+    count_absence = base_query.filter(db.or_(
+        Attendance.status == 'ABSENT',
+        Attendance.event_type.in_(ABSENCE_CATEGORY_ABSENT),
+    )).count()
 
     # Monthly trend
     monthly_data = db.session.query(
@@ -1156,6 +1171,8 @@ def api_employee_history_data(employee_id):
             'total_lost_minutes': total_lost_minutes,
             'total_lost_hours': round(total_lost_minutes / 60, 2),
             'count_absence': count_absence,
+            'count_faltas_integrais': count_faltas_integrais,
+            'count_atestados': count_atestados,
             'count_delay': count_delay,
             'count_exit': count_exit,
             'date_from': start.isoformat(),

@@ -2,6 +2,35 @@ from datetime import time as dt_time, datetime, timedelta, date as dt_date
 from extensions import db
 from models.attendance import Attendance
 
+# ── Operational absence categories ──────────────────────────────
+# Full absences (integral) + imported operational absence types.
+ABSENCE_CATEGORY_FULL = ('FULL_ABSENCE', 'FALTA', 'SUSPENSAO', 'SITUACAO_LEGAL')
+# Medical / certificates.
+ABSENCE_CATEGORY_MEDICAL = ('ATESTADO', 'LICENCA')
+# Late arrival (Atraso).
+ABSENCE_CATEGORY_LATE = ('LATE_ARRIVAL', 'ATRASO')
+# Early leave (Saída Antecipada). EARLY_EXIT kept for backward compatibility.
+ABSENCE_CATEGORY_EARLY = ('EARLY_EXIT', 'EARLY_DEPARTURE', 'SAIDA_ANTECIPADA')
+# Records that count toward the "Faltas" card counter (full + medical).
+ABSENCE_CATEGORY_ABSENT = ABSENCE_CATEGORY_FULL + ABSENCE_CATEGORY_MEDICAL
+
+
+def absence_type_category(event_type):
+    """Map an Attendance ``event_type`` to its operational category.
+
+    Returns one of 'full', 'medical', 'late', 'early', or None for unknown
+    (e.g. 'PRESENT', 'VACATION') event types.
+    """
+    if event_type in ABSENCE_CATEGORY_FULL:
+        return 'full'
+    if event_type in ABSENCE_CATEGORY_MEDICAL:
+        return 'medical'
+    if event_type in ABSENCE_CATEGORY_LATE:
+        return 'late'
+    if event_type in ABSENCE_CATEGORY_EARLY:
+        return 'early'
+    return None
+
 
 def calculate_shift_net_minutes(start_str, end_str, break_minutes):
     """
@@ -161,8 +190,8 @@ def calculate_bradford_factor(employee_id, start_date=None, end_date=None):
 
     B = S² × D
 
-    - S = number of distinct absence spells (consecutive FULL_ABSENCE days = 1 spell).
-    - D = total days of FULL_ABSENCE.
+    - S = number of distinct absence spells (consecutive absence days = 1 spell).
+    - D = total days of absence (status='ABSENT' or an imported absence type).
 
     Delegates to calculate_bradford_bulk() for a single employee.
     """
@@ -178,6 +207,9 @@ def calculate_bradford_bulk(employee_ids=None, start_date=None, end_date=None):
 
     Uses SQLite window functions (LAG) to detect consecutive absence spells
     directly in the database, avoiding Python-side iteration.
+
+    An absence day is any Attendance row with ``status='ABSENT'`` or an imported
+    absence type (``FALTA``, ``ATESTADO``, ``SUSPENSAO``, ``SITUACAO_LEGAL``).
 
     Args:
         employee_ids (list[str], optional): Specific employees. None = all active.
@@ -236,7 +268,8 @@ def calculate_bradford_bulk(employee_ids=None, start_date=None, end_date=None):
             FROM (
                 SELECT DISTINCT employee_id, record_date
                 FROM attendances
-                WHERE event_type = 'FULL_ABSENCE'
+                WHERE (status = 'ABSENT'
+                       OR event_type IN ('FALTA', 'ATESTADO', 'SUSPENSAO', 'SITUACAO_LEGAL'))
                   AND record_date >= :start_date
                   AND record_date <= :end_date
                   {emp_clause}

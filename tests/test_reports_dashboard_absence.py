@@ -75,9 +75,11 @@ def test_overview_and_bradford(client, app, admin_user, leader_user, leader_line
     end = date(2026, 8, 31)
     with app.app_context():
         results = calculate_bradford_bulk(employee_ids=['RPT-EMP1'], start_date=start, end_date=end)
-        # Only FULL_ABSENCE counts for Bradford: 1 day -> B = 1.
-        assert results['RPT-EMP1']['total_days'] == 1
-        assert results['RPT-EMP1']['bradford_score'] == 1
+        # Any ABSENT record (status='ABSENT' or the imported absence types) counts:
+        # FULL_ABSENCE (07/02) + ATESTADO (08/19) = 2 days, 2 spells -> B = 2^2 * 2 = 8.
+        assert results['RPT-EMP1']['total_days'] == 2
+        assert results['RPT-EMP1']['spells'] == 2
+        assert results['RPT-EMP1']['bradford_score'] == 8
 
 
 # 4. Excel export still works.

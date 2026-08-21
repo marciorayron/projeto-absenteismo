@@ -286,10 +286,11 @@ function renderAbsenceTypeChart(summary) {
     absenceTypeChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: ['Faltas Integrais', 'Atrasos', 'Saídas Antecipadas'],
+            labels: ['Faltas Integrais', 'Atestados', 'Atrasos', 'Saídas Antecipadas'],
             datasets: [{
-                data: [summary.count_absence, summary.count_delay, summary.count_exit],
-                backgroundColor: ['#dc3545', '#ffc107', '#0dcaf0'],
+                data: [summary.count_faltas_integrais, summary.count_atestados,
+                       summary.count_delay, summary.count_exit],
+                backgroundColor: ['#dc3545', '#20c997', '#ffc107', '#0dcaf0'],
                 borderWidth: 1
             }]
         },
